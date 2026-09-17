@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OUTPOST // Disaster Response Command</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Expanded:wght@600;700&family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  --ink:#0e0c09;
+  --paper:#f2ead9;
+  --paper-dim:#c9bfa8;
+  --panel:#161310;
+  --line:#3a332a;
+  --line-strong:#5c5240;
+  --gold:#d6923e;
+  --gold-deep:#9c6420;
+  --alta:#a8342b;
+  --moss:#5c7452;
+  --brass:#8a7455;
+  --font-poster:'Anton', sans-serif;
+  --font-head:'Archivo Expanded', sans-serif;
+  --font-cond:'Barlow Condensed', sans-serif;
+  --font-body:'Inter', sans-serif;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{ width:100%; height:100%; overflow:hidden; background:var(--ink); color:var(--paper); font-family:var(--font-body); }
+@media (prefers-reduced-motion: reduce){ *{ animation-duration:0.001s !important; transition-duration:0.001s !important; } }
+
+/* film-grain texture, used everywhere */
+.grain{ position:fixed; inset:0; pointer-events:none; z-index:900; opacity:0.05; mix-blend-mode:overlay; }
+
+/* ---------------- CUSTOM CURSOR: the drone ---------------- */
+html.has-custom-cursor, html.has-custom-cursor *{ cursor:none !important; }
+#customCursor{ position:fixed; top:0; left:0; width:30px; height:30px; pointer-events:none; z-index:2000; opacity:0; }
+#customCursor svg{ width:100%; height:100%; overflow:visible; }
+.hd-body{ fill:var(--gold); stroke:var(--ink); stroke-width:5; }
+.hd-arm{ stroke:var(--ink); stroke-width:5; stroke-linecap:round; }
+.hd-rotor{ fill:var(--paper); stroke:var(--ink); stroke-width:4; }
+.hd-blade{ stroke:var(--ink); stroke-width:2.5; stroke-linecap:round; transform-origin:center; animation:hdSpin 0.35s linear infinite; }
+.hd-eye{ fill:var(--ink); }
+@keyframes hdSpin{ from{ transform:rotate(0);} to{ transform:rotate(360deg);} }
+
+/* ---------------- HERO DRONE: opening entrance graphic ---------------- */
+#heroDrone{
+  position:fixed; width:300px; height:300px; left:50%; top:50%;
+  z-index:250; pointer-events:none; transform-origin:center center;
+}
+#heroDrone svg{ width:100%; height:100%; overflow:visible; }
+#heroDrone.settled{ animation:hdIdle 3.4s ease-in-out infinite alternate; }
+@keyframes hdIdle{ from{ transform:rotate(-3deg);} to{ transform:rotate(3deg);} }
+.markSlot{ width:34px; height:34px; flex-shrink:0; position:relative; }
+
+/* ---------------- MARQUEE (signature element) ---------------- */
+.ticker{
+  overflow:hidden; white-space:nowrap; background:var(--gold); color:var(--ink);
+  border-bottom:2px solid var(--ink); position:relative; z-index:30;
+}
+.ticker .track{
+  display:inline-block; padding-left:100%;
+  font-family:var(--font-cond); font-weight:700; letter-spacing:1.5px; font-size:13px;
+  text-transform:uppercase; animation:tickerScroll 22s linear infinite;
+}
+.ticker .track span{ margin:0 22px; }
+@keyframes tickerScroll{ from{ transform:translateX(0);} to{ transform:translateX(-100%);} }
+
+/* ---------------- INTRO ---------------- */
+#intro{ position:fixed; inset:0; z-index:200; background:#080604; }
+#intro canvas{ display:block; width:100%; height:100%; filter:sepia(0.25) contrast(1.05); }
+#introHud{ position:absolute; inset:0; pointer-events:none; font-family:var(--font-cond); }
+.plate{
+  position:absolute; border:2px solid var(--paper); background:rgba(8,6,4,0.55);
+  padding:8px 12px; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600;
+}
+#introHud .tl{ top:26px; left:26px; }
+#introHud .tr{ top:26px; right:26px; text-align:right; }
+#introHud .bl{ bottom:56px; left:26px; display:flex; gap:0; }
+#introHud .bl div{ border-right:1px solid var(--line-strong); padding:6px 16px; }
+#introHud .bl div:last-child{ border-right:none; }
+#introHud .bl span{ display:block; font-size:9px; color:var(--paper-dim); letter-spacing:2px; }
+#introHud .bl b{ font-family:var(--font-poster); font-size:20px; font-weight:400; letter-spacing:1px; }
+#introHud .br{ bottom:56px; right:26px; text-align:right; }
+#introHud .stamp{
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-60%); text-align:center;
+}
+#introHud .stamp h1{
+  font-family:var(--font-poster); font-weight:400; font-size:clamp(48px,9vw,120px);
+  letter-spacing:4px; color:var(--paper); opacity:0; line-height:0.9;
+}
+#introHud .stamp .rule{
+  height:6px; background:var(--gold); width:0%; margin:14px auto 0;
+}
+#introHud .stamp .sub{
+  font-family:var(--font-cond); font-weight:600; letter-spacing:6px; font-size:13px;
+  color:var(--gold); text-transform:uppercase; margin-top:16px; opacity:0;
+}
+#skipBtn{
+  position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+  pointer-events:auto; cursor:pointer; background:var(--paper); color:var(--ink);
+  border:2px solid var(--paper); font-family:var(--font-cond); font-weight:700; font-size:13px;
+  letter-spacing:2px; text-transform:uppercase; padding:11px 26px; opacity:0; transition:background .15s,color .15s;
+}
+#skipBtn:hover{ background:transparent; color:var(--paper); }
+
+/* ---------------- DASHBOARD ---------------- */
+#dashboard{ position:fixed; inset:0; opacity:0; pointer-events:none; display:grid; grid-template-rows:32px 78px 1fr; background:var(--ink); }
+#dashboard.live{ pointer-events:auto; }
+
+header{
+  grid-column:1/-1; display:flex; align-items:center; justify-content:space-between;
+  padding:0 24px; border-bottom:2px solid var(--paper); background:var(--ink);
+}
+header .brand{ display:flex; align-items:baseline; gap:14px; }
+header .brand h1{ font-family:var(--font-poster); font-weight:400; font-size:26px; letter-spacing:1px; color:var(--paper); }
+header .brand .sub{ font-family:var(--font-cond); font-size:11px; letter-spacing:2px; color:var(--paper-dim); text-transform:uppercase; }
+header .status{ display:flex; align-items:center; gap:24px; font-family:var(--font-cond); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:12px; }
+header .status .seal{
+  width:11px; height:11px; border:2px solid var(--moss); border-radius:50%; position:relative;
+}
+header .status .seal::after{ content:''; position:absolute; inset:2px; background:var(--moss); border-radius:50%; animation:blink 1.8s infinite; }
+@keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.15;} }
+header .status .item{ display:flex; align-items:center; gap:8px; color:var(--paper-dim); }
+header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; color:var(--paper); letter-spacing:1px; }
+
+#statBand{
+  grid-column:1/-1; display:flex; border-bottom:2px solid var(--paper); background:var(--panel);
+}
+.stat{ flex:1; padding:10px 22px; border-right:1px solid var(--line-strong); }
+.stat:last-child{ border-right:none; }
+.stat .num{ font-family:var(--font-poster); font-weight:400; font-size:34px; line-height:1; color:var(--paper); }
+.stat .num.alta{ color:var(--alta); } .stat .num.gold{ color:var(--gold); } .stat .num.moss{ color:var(--moss); }
+.stat .cap{ font-family:var(--font-cond); font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--paper-dim); margin-top:2px; }
+
+#body{ display:grid; grid-template-columns:280px 1fr 320px; min-height:0; }
+.panel-scroll{ overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line-strong) transparent; }
+.panel-scroll::-webkit-scrollbar{ width:5px; } .panel-scroll::-webkit-scrollbar-thumb{ background:var(--line-strong); }
+
+#sidebarLeft{ border-right:2px solid var(--paper); padding:18px 18px; display:flex; flex-direction:column; gap:22px; }
+.hd{ font-family:var(--font-head); font-weight:700; font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--gold); border-bottom:2px solid var(--line-strong); padding-bottom:8px; margin-bottom:10px; }
+.numlist{ display:flex; flex-direction:column; gap:9px; }
+.numlist .row{ display:flex; align-items:center; gap:10px; font-family:var(--font-cond); font-size:13px; }
+.numlist .row .idx{ font-family:var(--font-poster); font-weight:400; font-size:15px; color:var(--brass); width:20px; }
+.numlist .row .swatch{ width:11px; height:11px; border:1.5px solid var(--paper); flex-shrink:0; }
+.numlist .row .swatch.circle{ border-radius:50%; }
+
+.zonerow{ display:flex; justify-content:space-between; align-items:baseline; font-family:var(--font-cond); font-size:13px; padding:6px 0; border-bottom:1px solid var(--line); }
+.zonerow b{ font-family:var(--font-head); font-size:11px; letter-spacing:1px; }
+
+#mapWrap{ position:relative; min-width:0; min-height:0; border-right:2px solid var(--paper); }
+#map{ position:absolute; inset:14px; background:#0c0a08; border:2px solid var(--paper); }
+.leaflet-container{ background:#0c0a08; }
+.corner-tick{ position:absolute; width:16px; height:16px; border-color:var(--gold); z-index:440; pointer-events:none; }
+.corner-tick.tl{ top:8px; left:8px; border-top:3px solid var(--gold); border-left:3px solid var(--gold); }
+.corner-tick.tr{ top:8px; right:8px; border-top:3px solid var(--gold); border-right:3px solid var(--gold); }
+.corner-tick.bl{ bottom:8px; left:8px; border-bottom:3px solid var(--gold); border-left:3px solid var(--gold); }
+.corner-tick.br{ bottom:8px; right:8px; border-bottom:3px solid var(--gold); border-right:3px solid var(--gold); }
+
+#mapCaption{
+  position:absolute; top:22px; left:22px; z-index:450; background:var(--ink); border:2px solid var(--paper);
+  padding:6px 12px; font-family:var(--font-cond); font-weight:600; font-size:11px; letter-spacing:1.5px; text-transform:uppercase;
+}
+#mapCaption b{ color:var(--gold); }
+#simClockPlate{
+  position:absolute; top:22px; right:22px; z-index:450; background:var(--gold); color:var(--ink); border:2px solid var(--ink);
+  padding:6px 12px; font-family:var(--font-poster); font-weight:400; font-size:13px; letter-spacing:1px;
+}
+
+/* flat markers -- no glow, no blur */
+.drone-icon{ width:22px; height:22px; position:relative; }
+.drone-icon .reticle{ position:absolute; inset:0; border:2px solid var(--gold); }
+.drone-icon .reticle::before, .drone-icon .reticle::after{ content:''; position:absolute; background:var(--gold); }
+.drone-icon .dot{ position:absolute; inset:8px; background:var(--gold); }
+.drone-icon .spin{ position:absolute; inset:-4px; border-top:2px solid var(--gold); border-radius:50%; animation:spin 1.4s linear infinite; }
+@keyframes spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
+.drone-icon .idlabel{ position:absolute; top:24px; left:50%; transform:translateX(-50%); white-space:nowrap;
+  font-family:var(--font-cond); font-weight:700; font-size:10px; letter-spacing:1px; color:var(--gold); background:var(--ink); padding:1px 4px; border:1px solid var(--gold); }
+
+.victim-icon{ width:16px; height:16px; border:2px solid var(--paper); }
+.victim-icon.critical{ background:var(--alta); }
+.victim-icon.high{ background:#c9622f; }
+.victim-icon.moderate{ background:var(--gold); }
+.victim-icon.rescued{ background:var(--moss); }
+
+.team-icon{ width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-bottom:14px solid var(--moss);
+  filter:drop-shadow(1px 1px 0 var(--ink)); transition:transform .3s linear; }
+
+.shelter-icon{ width:22px; height:22px; background:var(--gold); border:2px solid var(--ink); display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-poster); color:var(--ink); font-size:12px; }
+.resource-icon{ width:16px; height:16px; background:var(--ink); border:2px solid var(--gold); transform:rotate(45deg); }
+
+.leaflet-tooltip.field-tip{ background:var(--ink); border:2px solid var(--paper); color:var(--paper); border-radius:0;
+  font-family:var(--font-cond); font-weight:600; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:4px 8px; }
+
+#sidebarRight{ padding:18px 18px; display:flex; flex-direction:column; min-height:0; }
+#feedList{ flex:1; min-height:0; display:flex; flex-direction:column; gap:0; margin-top:4px; }
+.feed-item{ display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+.feed-item .idx{ font-family:var(--font-poster); font-weight:400; font-size:18px; color:var(--brass); width:26px; flex-shrink:0; }
+.feed-item .body{ font-family:var(--font-body); font-size:12.5px; line-height:1.5; }
+.feed-item .body .t{ display:block; font-family:var(--font-cond); font-size:10px; letter-spacing:1.5px; color:var(--paper-dim); text-transform:uppercase; margin-bottom:2px; }
+.feed-item .swatch{ width:8px; height:8px; margin-top:5px; flex-shrink:0; }
+.feed-item.crit .swatch{ background:var(--alta); } .feed-item.warn .swatch{ background:var(--gold); }
+.feed-item.ok .swatch{ background:var(--moss); } .feed-item.info .swatch{ background:var(--brass); }
+
+/* detail drawer */
+#detailDrawer{
+  position:absolute; left:14px; right:14px; bottom:-320px; z-index:500;
+  background:var(--ink); border:2px solid var(--paper); padding:18px 22px;
+}
+#detailDrawer .head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:2px solid var(--line-strong); padding-bottom:10px; }
+#detailDrawer .head h3{ font-family:var(--font-poster); font-weight:400; font-size:20px; letter-spacing:1px; color:var(--gold); }
+#detailDrawer .close{ cursor:pointer; font-family:var(--font-cond); font-weight:700; font-size:12px; letter-spacing:1.5px; border:2px solid var(--paper); padding:6px 14px; text-transform:uppercase; }
+#detailDrawer .close:hover{ background:var(--paper); color:var(--ink); }
+#detailGrid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:16px; }
+#detailGrid .field span{ display:block; font-family:var(--font-cond); font-size:10px; letter-spacing:1.5px; color:var(--paper-dim); text-transform:uppercase; margin-bottom:4px; }
+#detailGrid .field b{ font-family:var(--font-poster); font-weight:400; font-size:18px; color:var(--paper); }
+
+@media (max-width:980px){
+  #body{ grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
+  #sidebarLeft, #sidebarRight{ border:none; border-top:2px solid var(--paper); max-height:180px; }
+  #mapWrap{ border-right:none; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="grainCanvas" class="grain"></canvas>
+
+<!-- Hero drone: fills the screen on load, spins, then settles as the brand mark -->
+<div id="heroDrone">
+  <svg viewBox="0 0 100 100">
+    <line class="hd-arm" x1="50" y1="50" x2="20" y2="20"/>
+    <line class="hd-arm" x1="50" y1="50" x2="80" y2="20"/>
+    <line class="hd-arm" x1="50" y1="50" x2="20" y2="80"/>
+    <line class="hd-arm" x1="50" y1="50" x2="80" y2="80"/>
+    <g>
+      <circle class="hd-rotor" cx="20" cy="20" r="12"/>
+      <line class="hd-blade" x1="11" y1="20" x2="29" y2="20"/>
+      <line class="hd-blade" x1="20" y1="11" x2="20" y2="29"/>
+    </g>
+    <g>
+      <circle class="hd-rotor" cx="80" cy="20" r="12"/>
+      <line class="hd-blade" x1="71" y1="20" x2="89" y2="20"/>
+      <line class="hd-blade" x1="80" y1="11" x2="80" y2="29"/>
+    </g>
+    <g>
+      <circle class="hd-rotor" cx="20" cy="80" r="12"/>
+      <line class="hd-blade" x1="11" y1="80" x2="29" y2="80"/>
+      <line class="hd-blade" x1="20" y1="71" x2="20" y2="89"/>
+    </g>
+    <g>
+      <circle class="hd-rotor" cx="80" cy="80" r="12"/>
+      <line class="hd-blade" x1="71" y1="80" x2="89" y2="80"/>
+      <line class="hd-blade" x1="80" y1="71" x2="80" y2="89"/>
+    </g>
+    <rect class="hd-body" x="33" y="33" width="34" height="34" rx="8"/>
+    <circle class="hd-eye" cx="50" cy="43" r="4"/>
+  </svg>
+</div>
+
+<!-- Custom cursor: a small drone that banks toward your movement direction -->
+<div id="customCursor">
+  <svg viewBox="0 0 100 100">
+    <line class="hd-arm" x1="50" y1="50" x2="20" y2="20"/>
+    <line class="hd-arm" x1="50" y1="50" x2="80" y2="20"/>
+    <line class="hd-arm" x1="50" y1="50" x2="20" y2="80"/>
+    <line class="hd-arm" x1="50" y1="50" x2="80" y2="80"/>
+    <g><circle class="hd-rotor" cx="20" cy="20" r="12"/><line class="hd-blade" x1="11" y1="20" x2="29" y2="20"/><line class="hd-blade" x1="20" y1="11" x2="20" y2="29"/></g>
+    <g><circle class="hd-rotor" cx="80" cy="20" r="12"/><line class="hd-blade" x1="71" y1="20" x2="89" y2="20"/><line class="hd-blade" x1="80" y1="11" x2="80" y2="29"/></g>
+    <g><circle class="hd-rotor" cx="20" cy="80" r="12"/><line class="hd-blade" x1="11" y1="80" x2="29" y2="80"/><line class="hd-blade" x1="20" y1="71" x2="20" y2="89"/></g>
+    <g><circle class="hd-rotor" cx="80" cy="80" r="12"/><line class="hd-blade" x1="71" y1="80" x2="89" y2="80"/><line class="hd-blade" x1="80" y1="71" x2="80" y2="89"/></g>
+    <rect class="hd-body" x="33" y="33" width="34" height="34" rx="8"/>
+    <circle class="hd-eye" cx="50" cy="43" r="4"/>
+  </svg>
+</div>
+
+<!-- ============ INTRO ============ -->
+<div id="intro">
+  <div id="introHud">
+    <div class="plate tl">Field Sim // Drone Telemetry</div>
+    <div class="plate tr">Sector 07 · Delta Grid<br>Link — Encrypted</div>
+    <div class="bl" id="telemetryRow">
+      <div><span>Alt (m)</span><b id="tAlt">0</b></div>
+      <div><span>Spd (km/h)</span><b id="tSpd">0</b></div>
+      <div><span>Batt</span><b id="tBatt">0%</b></div>
+    </div>
+    <div class="plate br" id="tGps">Lat 00.0000<br>Lng 00.0000</div>
+    <div class="stamp">
+      <h1 id="centerTitle">OUTPOST</h1>
+      <div class="rule" id="titleRule"></div>
+      <div class="sub" id="centerSub">Disaster Response Command</div>
+    </div>
+  </div>
+  <div class="ticker" style="position:absolute; bottom:0; left:0; right:0;">
+    <div class="track"><span>LIVE SIMULATION — TELEMETRY IS SYNTHETIC — DEMO MODE</span><span>LIVE SIMULATION — TELEMETRY IS SYNTHETIC — DEMO MODE</span><span>LIVE SIMULATION — TELEMETRY IS SYNTHETIC — DEMO MODE</span></div>
+  </div>
+  <button id="skipBtn">Enter Command Room →</button>
+</div>
+
+<!-- ============ DASHBOARD ============ -->
+<div id="dashboard">
+  <div class="ticker">
+    <div class="track" id="tickerTrack"></div>
+  </div>
+
+  <header>
+    <div class="brand">
+      <div class="markSlot" id="markSlot"></div>
+      <h1>OUTPOST</h1>
+      <div class="sub">Disaster Response Command — Sector 07</div>
+    </div>
+    <div class="status">
+      <div class="item"><div class="seal"></div> Socket.io — Live</div>
+      <div class="item">Uplink 18ms</div>
+      <div class="clock" id="clock">00:00:00</div>
+    </div>
+  </header>
+
+  <div id="statBand">
+    <div class="stat"><div class="num gold" id="statDrones">0/0</div><div class="cap">Drones Active</div></div>
+    <div class="stat"><div class="num alta" id="statVictims">0</div><div class="cap">Victims Unrescued</div></div>
+    <div class="stat"><div class="num moss" id="statTeams">0/0</div><div class="cap">Teams Deployed</div></div>
+    <div class="stat"><div class="num" id="statShelter">0%</div><div class="cap">Shelter Capacity</div></div>
+    <div class="stat"><div class="num" id="statRescued">0</div><div class="cap">Rescued To Date</div></div>
+  </div>
+
+  <div id="body">
+    <aside id="sidebarLeft" class="panel-scroll">
+      <div>
+        <div class="hd">Field Key</div>
+        <div class="numlist">
+          <div class="row"><span class="idx">01</span><span class="swatch" style="background:var(--gold)"></span> Drone — patrol</div>
+          <div class="row"><span class="idx">02</span><span class="swatch circle" style="background:var(--alta)"></span> Victim — critical</div>
+          <div class="row"><span class="idx">03</span><span class="swatch circle" style="background:var(--gold)"></span> Victim — moderate</div>
+          <div class="row"><span class="idx">04</span><span class="swatch" style="background:var(--moss); clip-path:polygon(50% 0,100% 100%,0 100%);"></span> Rescue team</div>
+          <div class="row"><span class="idx">05</span><span class="swatch" style="background:var(--gold)"></span> Shelter</div>
+          <div class="row"><span class="idx">06</span><span class="swatch" style="background:var(--ink); border-color:var(--gold); transform:rotate(45deg);"></span> Resource cache</div>
+        </div>
+      </div>
+      <div>
+        <div class="hd">Affected Zones</div>
+        <div id="zoneList"></div>
+      </div>
+    </aside>
+
+    <div id="mapWrap">
+      <div id="map"></div>
+      <div class="corner-tick tl"></div><div class="corner-tick tr"></div>
+      <div class="corner-tick bl"></div><div class="corner-tick br"></div>
+      <div id="mapCaption">Grid Ref <b>DL-7734</b></div>
+      <div id="simClockPlate">T+00:00</div>
+
+      <div id="detailDrawer">
+        <div class="head"><h3 id="detailTitle">ENTITY DETAIL</h3><div class="close" id="detailClose">Close ✕</div></div>
+        <div id="detailGrid"></div>
+      </div>
+    </div>
+
+    <aside id="sidebarRight">
+      <div class="hd">Dispatch Log</div>
+      <div id="feedList" class="panel-scroll"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* film grain, drawn once to a tiled canvas texture used as a fixed overlay */
+(function(){
+  const c = document.getElementById('grainCanvas');
+  c.width = 160; c.height = 160;
+  const ctx = c.getContext('2d');
+  const imgData = ctx.createImageData(160,160);
+  for(let i=0;i<imgData.data.length;i+=4){
+    const v = Math.random()*255;
+    imgData.data[i]=v; imgData.data[i+1]=v; imgData.data[i+2]=v; imgData.data[i+3]=255;
+  }
+  ctx.putImageData(imgData,0,0);
+  const url = c.toDataURL();
+  c.style.width='100%'; c.style.height='100%';
+  c.style.background = `url(${url})`;
+  c.style.backgroundSize='160px 160px';
+  c.getContext('2d').clearRect(0,0,160,160);
+})();
+
+/* ---------------- CUSTOM CURSOR: drone follows the pointer, banks toward motion ---------------- */
+(function(){
+  if(!window.matchMedia('(pointer: fine)').matches) return;
+  document.documentElement.classList.add('has-custom-cursor');
+  const cursor = document.getElementById('customCursor');
+  gsap.set(cursor, { xPercent:-50, yPercent:-50 });
+  const xTo = gsap.quickTo(cursor, 'x', { duration:0.35, ease:'power3' });
+  const yTo = gsap.quickTo(cursor, 'y', { duration:0.35, ease:'power3' });
+  const rotTo = gsap.quickTo(cursor, 'rotation', { duration:0.5, ease:'power3' });
+  let lastX = window.innerWidth/2, lastY = window.innerHeight/2, shown = false;
+  window.addEventListener('mousemove', (e)=>{
+    if(!shown){ gsap.to(cursor, { opacity:1, duration:0.3 }); shown = true; }
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    if(Math.hypot(dx,dy) > 2){ rotTo(Math.atan2(dy,dx)*180/Math.PI + 90); }
+    lastX = e.clientX; lastY = e.clientY;
+    xTo(e.clientX); yTo(e.clientY);
+  });
+  document.addEventListener('mouseleave', ()=> { gsap.to(cursor, { opacity:0, duration:0.3 }); shown = false; });
+})();
+
+/* ---------------- HERO DRONE: fullscreen entrance -> spin -> settle as brand mark ---------------- */
+function playHeroDrone(onDone){
+  const hero = document.getElementById('heroDrone');
+  const slot = document.getElementById('markSlot');
+  requestAnimationFrame(()=>{
+    const rect = slot.getBoundingClientRect();
+    const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+    gsap.set(hero, { opacity:0, scale:0.6, xPercent:-50, yPercent:-50, rotation:0, left:'50%', top:'50%', width:300, height:300 });
+    gsap.timeline({ onComplete: ()=>{
+        hero.style.position = 'relative';
+        hero.style.left = '0'; hero.style.top = '0'; hero.style.width = '100%'; hero.style.height = '100%';
+        hero.style.transform = 'none';
+        slot.appendChild(hero);
+        hero.classList.add('settled');
+        if(onDone) onDone();
+      }})
+      .to(hero, { opacity:1, scale:1, duration:0.45, ease:'power2.out' })
+      .to(hero, { rotation:'+=720', duration:1.15, ease:'power2.inOut' }, '+=0.05')
+      .to(hero, { left:cx+'px', top:cy+'px', width:rect.width, height:rect.height, duration:1.05, ease:'power3.inOut' }, '-=0.2');
+  });
+}
+
+/* =========================================================================
+   INTRO — three.js terrain flyover, restyled flat/duotone (no neon glow)
+   ========================================================================= */
+(function(){
+  const introEl = document.getElementById('intro');
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x0a0806, 0.02);
+  const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x0a0806);
+  introEl.insertBefore(renderer.domElement, introEl.firstChild);
+
+  const size = 240, seg = 80;
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI/2);
+  const pos = geo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x = pos.getX(i), z = pos.getZ(i);
+    const h = Math.sin(x*0.06)*3.2 + Math.cos(z*0.05)*3.2 + Math.sin((x+z)*0.03)*2.4;
+    pos.setY(i, h);
+  }
+  geo.computeVertexNormals();
+  const terrain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color:0x6b5230, wireframe:true, transparent:true, opacity:0.5 }));
+  scene.add(terrain);
+
+  const grid = new THREE.GridHelper(size, 24, 0x8a6a3a, 0x2a2015);
+  grid.position.y = -0.5;
+  scene.add(grid);
+
+  const drone = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.3,1.4), new THREE.MeshBasicMaterial({ color:0xd6923e }));
+  drone.add(body);
+  [[1,0,1],[1,0,-1],[-1,0,1],[-1,0,-1]].forEach(p=>{
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.08,14), new THREE.MeshBasicMaterial({ color:0x3a2c14, wireframe:true }));
+    rotor.position.set(p[0],0.05,p[2]); drone.add(rotor);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.1,Math.sqrt(2)*1.05), new THREE.MeshBasicMaterial({color:0x2a2014}));
+    arm.position.set(p[0]*0.5,0,p[2]*0.5); arm.rotation.y = Math.PI/4*(p[0]*p[2]>0?1:-1);
+    drone.add(arm);
+  });
+  scene.add(drone);
+
+  const flightPoints = [];
+  for(let i=0;i<=200;i++){
+    const t = i/200*Math.PI*2;
+    flightPoints.push(new THREE.Vector3(Math.sin(t)*55, 9+Math.sin(t*3)*1.6, Math.cos(t*1.4)*40));
+  }
+  const flightCurve = new THREE.CatmullRomCurve3(flightPoints, true);
+
+  let introT = 0, introActive = true;
+  const clock = new THREE.Clock();
+  function animateIntro(){
+    if(!introActive) return;
+    requestAnimationFrame(animateIntro);
+    const dt = clock.getDelta();
+    introT += dt*0.045;
+    const tt = introT % 1;
+    const p = flightCurve.getPointAt(tt);
+    const pNext = flightCurve.getPointAt((tt+0.01)%1);
+    drone.position.copy(p); drone.lookAt(pNext);
+    const camOffset = new THREE.Vector3().subVectors(p,pNext).normalize().multiplyScalar(-9);
+    camOffset.y += 4.5;
+    camera.position.copy(p).add(camOffset);
+    camera.lookAt(p);
+    renderer.render(scene, camera);
+
+    document.getElementById('tAlt').textContent = (120+Math.sin(introT*6)*14).toFixed(0);
+    document.getElementById('tSpd').textContent = (38+Math.sin(introT*4)*6).toFixed(0);
+    document.getElementById('tBatt').textContent = Math.max(61,(91-introT*3)).toFixed(0)+'%';
+    document.getElementById('tGps').innerHTML = 'Lat '+(22.50+p.x*0.001).toFixed(4)+'<br>Lng '+(88.30+p.z*0.001).toFixed(4);
+  }
+  animateIntro();
+
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  playHeroDrone(()=>{
+    gsap.timeline()
+      .to('#centerTitle', {opacity:1, duration:0.9, delay:0.15})
+      .to('#titleRule', {width:'220px', duration:0.7, ease:'power3.out'}, '-=0.3')
+      .to('#centerSub', {opacity:1, duration:0.7}, '-=0.2')
+      .to('.plate', {opacity:1, duration:0.6, stagger:0.12}, '-=0.8')
+      .to('#skipBtn', {opacity:1, duration:0.6}, '-=0.4');
+  });
+
+  function enterCommandCenter(){
+    introActive = false;
+    gsap.to(introEl, { opacity:0, duration:1, ease:'power2.inOut', onComplete:()=>{ introEl.style.display='none'; }});
+    const dash = document.getElementById('dashboard');
+    dash.classList.add('live');
+    gsap.to(dash, { opacity:1, duration:1, ease:'power2.out' });
+    initDashboard();
+  }
+  document.getElementById('skipBtn').addEventListener('click', enterCommandCenter);
+  setTimeout(enterCommandCenter, 9500);
+})();
+
+/* =========================================================================
+   DASHBOARD — Leaflet tactical map, flat markers, simulated real-time engine
+   ========================================================================= */
+let dashboardInitialized = false;
+function initDashboard(){
+  if(dashboardInitialized) return;
+  dashboardInitialized = true;
+
+  const W=1000,H=1000;
+  const bm = document.createElement('canvas'); bm.width=W; bm.height=H;
+  const bctx = bm.getContext('2d');
+  bctx.fillStyle = '#0c0a08'; bctx.fillRect(0,0,W,H);
+  bctx.strokeStyle = 'rgba(214,146,62,0.10)';
+  for(let r=40;r<900;r+=55){
+    bctx.beginPath();
+    for(let a=0;a<=360;a+=4){
+      const rad=a*Math.PI/180, wobble=Math.sin(rad*3+r)*18+Math.cos(rad*5)*10;
+      const x=500+Math.cos(rad)*(r+wobble), y=500+Math.sin(rad)*(r+wobble)*0.7;
+      a===0?bctx.moveTo(x,y):bctx.lineTo(x,y);
+    }
+    bctx.stroke();
+  }
+  bctx.strokeStyle = 'rgba(120,140,150,0.5)'; bctx.lineWidth=24;
+  bctx.beginPath(); bctx.moveTo(0,180);
+  bctx.bezierCurveTo(260,260,340,520,620,560); bctx.bezierCurveTo(820,590,880,720,1000,760);
+  bctx.stroke();
+  bctx.strokeStyle='rgba(255,255,255,0.03)'; bctx.lineWidth=1;
+  for(let i=0;i<=1000;i+=50){ bctx.beginPath();bctx.moveTo(i,0);bctx.lineTo(i,1000);bctx.stroke();
+    bctx.beginPath();bctx.moveTo(0,i);bctx.lineTo(1000,i);bctx.stroke(); }
+  const basemapURL = bm.toDataURL();
+
+  const bounds=[[0,0],[1000,1000]];
+  const map = L.map('map', { crs:L.CRS.Simple, minZoom:-1, maxZoom:3, zoomControl:false, attributionControl:false });
+  L.imageOverlay(basemapURL, bounds).addTo(map);
+  map.fitBounds(bounds); map.setView([500,500],0);
+  L.control.zoom({ position:'bottomright' }).addTo(map);
+
+  const zones = [
+    { name:'Riverside Flood Zone', color:'#5f8fa3', pts:[[120,760],[260,690],[420,700],[440,860],[260,900],[130,860]], sev:'SEVERE' },
+    { name:'Warehouse District Collapse', color:'#a8342b', pts:[[640,300],[760,280],[790,400],[700,440],[620,400]], sev:'CRITICAL' },
+    { name:'Northside Fire Perimeter', color:'#d6923e', pts:[[300,120],[420,140],[440,240],[330,260],[270,200]], sev:'ACTIVE' }
+  ];
+  zones.forEach(z=>{
+    L.polygon(z.pts.map(p=>[p[1],p[0]]), { color:z.color, weight:2, fillColor:z.color, fillOpacity:0.14, dashArray:'6,4' })
+      .addTo(map).bindTooltip(z.name+' — '+z.sev, { className:'field-tip', direction:'top' });
+  });
+  document.getElementById('zoneList').innerHTML = zones.map(z=>
+    `<div class="zonerow"><span>${z.name}</span><b style="color:${z.color}">${z.sev}</b></div>`).join('');
+
+  const droneDefs = [
+    { id:'DRN-01', center:[300,780], radius:110, speed:0.55, phase:0 },
+    { id:'DRN-02', center:[700,360], radius:90,  speed:0.7,  phase:2 },
+    { id:'DRN-03', center:[370,190], radius:70,  speed:0.9,  phase:4 },
+    { id:'DRN-04', center:[550,600], radius:130, speed:0.4,  phase:1 },
+  ];
+  const drones = droneDefs.map(d=>({ id:d.id, def:d, angle:d.phase, battery:60+Math.random()*35,
+    status:'PATROL', sensor:(18+Math.random()*4).toFixed(1)+'°C thermal', marker:null }));
+
+  let victimSeq=1;
+  function makeVictim(loc,priority){ return { id:'VIC-'+String(victimSeq++).padStart(2,'0'), location:loc, priority, status:'UNRESCUED', marker:null }; }
+  const victims = [
+    makeVictim([200,800],'CRITICAL'), makeVictim([260,850],'HIGH'), makeVictim([150,820],'MODERATE'),
+    makeVictim([700,340],'CRITICAL'), makeVictim([730,410],'HIGH'),
+    makeVictim([340,180],'MODERATE'), makeVictim([400,220],'HIGH'),
+    makeVictim([580,610],'MODERATE')
+  ];
+  let rescuedCount = 0;
+
+  const teamDefs = [{id:'TEAM-ALPHA',loc:[420,900]},{id:'TEAM-BRAVO',loc:[850,300]},{id:'TEAM-CHARLIE',loc:[500,100]}];
+  const teams = teamDefs.map(t=>({ id:t.id, location:[...t.loc], availability:'AVAILABLE', assignedVictim:null, marker:null, line:null }));
+
+  const shelters = [
+    { id:'SHL-01', loc:[80,950], capacity:200, occupancy:126 },
+    { id:'SHL-02', loc:[900,900], capacity:150, occupancy:94 },
+    { id:'SHL-03', loc:[900,80], capacity:180, occupancy:60 }
+  ];
+  const resources = [
+    { id:'RES-MED-1', loc:[250,700], type:'Medical' },
+    { id:'RES-WTR-1', loc:[650,450], type:'Water' },
+    { id:'RES-FUEL-1', loc:[480,150], type:'Fuel/Power' }
+  ];
+
+  function droneIcon(){ return L.divIcon({ className:'', html:`<div class="drone-icon"><div class="spin"></div><div class="reticle"></div><div class="dot"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] }); }
+  function victimIcon(p,rescued){ const cls = rescued?'rescued':p.toLowerCase(); return L.divIcon({ className:'', html:`<div class="victim-icon ${cls}"></div>`, iconSize:[16,16], iconAnchor:[8,8] }); }
+  function teamIcon(){ return L.divIcon({ className:'', html:`<div class="team-icon"></div>`, iconSize:[18,18], iconAnchor:[9,9] }); }
+  function shelterIcon(){ return L.divIcon({ className:'', html:`<div class="shelter-icon">S</div>`, iconSize:[22,22], iconAnchor:[11,11] }); }
+  function resourceIcon(){ return L.divIcon({ className:'', html:`<div class="resource-icon"></div>`, iconSize:[16,16], iconAnchor:[8,8] }); }
+
+  shelters.forEach(s=>{
+    const m = L.marker([s.loc[1],s.loc[0]], { icon:shelterIcon() }).addTo(map).bindTooltip(`${s.id} — ${s.occupancy}/${s.capacity}`, { className:'field-tip' });
+    m.on('click', ()=>showDetail('Shelter', s.id, { Location:`${s.loc[0]}, ${s.loc[1]}`, Capacity:s.capacity, Occupancy:s.occupancy, Status:(s.occupancy/s.capacity>0.85?'NEAR FULL':'OPEN') }));
+  });
+  resources.forEach(r=>{
+    const m = L.marker([r.loc[1],r.loc[0]], { icon:resourceIcon() }).addTo(map).bindTooltip(r.id, { className:'field-tip' });
+    m.on('click', ()=>showDetail('Resource Cache', r.id, { Type:r.type, Location:`${r.loc[0]}, ${r.loc[1]}`, Status:'AVAILABLE' }));
+  });
+  drones.forEach(d=>{
+    d.marker = L.marker([d.def.center[1],d.def.center[0]], { icon:droneIcon() }).addTo(map);
+    d.marker.on('click', ()=>showDetail('Drone', d.id, { GPS:`${d.marker.getLatLng().lng.toFixed(1)}, ${d.marker.getLatLng().lat.toFixed(1)}`, Battery:d.battery.toFixed(0)+'%', Status:d.status, 'Sensor Data':d.sensor }));
+  });
+  victims.forEach(v=>{
+    v.marker = L.marker([v.location[1],v.location[0]], { icon:victimIcon(v.priority,false) }).addTo(map).bindTooltip(`${v.id} — ${v.priority}`, { className:'field-tip' });
+    v.marker.on('click', ()=>showDetail('Victim', v.id, { Location:`${v.location[0]}, ${v.location[1]}`, Priority:v.priority, Status:v.status }));
+  });
+  teams.forEach(t=>{
+    t.marker = L.marker([t.location[1],t.location[0]], { icon:teamIcon() }).addTo(map);
+    t.marker.on('click', ()=>showDetail('Rescue Team', t.id, { Location:`${t.location[0]}, ${t.location[1]}`, Availability:t.availability, 'Assigned Victim': t.assignedVictim?t.assignedVictim.id:'—' }));
+  });
+
+  const drawer = document.getElementById('detailDrawer');
+  const detailTitle = document.getElementById('detailTitle');
+  const detailGrid = document.getElementById('detailGrid');
+  function showDetail(type,id,fields){
+    detailTitle.textContent = `${type.toUpperCase()} — ${id}`;
+    detailGrid.innerHTML = Object.entries(fields).map(([k,v])=>`<div class="field"><span>${k.toUpperCase()}</span><b>${v}</b></div>`).join('');
+    gsap.to(drawer, { bottom:14, duration:0.45, ease:'power3.out' });
+  }
+  document.getElementById('detailClose').addEventListener('click', ()=>gsap.to(drawer,{bottom:-320,duration:0.35,ease:'power3.in'}));
+
+  const feedList = document.getElementById('feedList');
+  const tickerTrack = document.getElementById('tickerTrack');
+  let feedIdx = 1;
+  let tickerMsgs = [];
+  function refreshTicker(){
+    tickerTrack.innerHTML = (tickerMsgs.slice(0,6).concat(tickerMsgs.slice(0,6))).map(m=>`<span>${m}</span>`).join('');
+  }
+  function logEvent(msg, level){
+    tickerMsgs.unshift(msg.toUpperCase());
+    if(tickerMsgs.length>10) tickerMsgs.pop();
+    refreshTicker();
+    const el = document.createElement('div');
+    el.className = 'feed-item '+(level||'info');
+    const time = new Date().toLocaleTimeString();
+    el.innerHTML = `<div class="idx">${String(feedIdx++).padStart(2,'0')}</div><div class="swatch"></div><div class="body"><span class="t">${time}</span>${msg}</div>`;
+    feedList.insertBefore(el, feedList.firstChild);
+    gsap.from(el, { opacity:0, x:-10, duration:0.35 });
+    while(feedList.children.length>24) feedList.removeChild(feedList.lastChild);
+  }
+  logEvent('Socket.io channel established — streaming live telemetry.', 'ok');
+  logEvent('4 drones airborne across Sector 07 patrol grid.', 'info');
+  logEvent('Flood zone (Riverside) confirmed — 3 victims detected.', 'crit');
+
+  function dist(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1]); }
+  function tryAssign(){
+    teams.filter(t=>t.availability==='AVAILABLE').forEach(t=>{
+      const candidates = victims.filter(v=>v.status==='UNRESCUED' && !v.claimedBy);
+      if(!candidates.length) return;
+      candidates.sort((a,b)=>dist(t.location,a.location)-dist(t.location,b.location));
+      const target = candidates[0];
+      target.claimedBy = t.id; t.assignedVictim = target; t.availability='DEPLOYED';
+      if(t.line) map.removeLayer(t.line);
+      t.line = L.polyline([[t.location[1],t.location[0]],[target.location[1],target.location[0]]], { color:'#5c7452', weight:3, dashArray:'8,6', opacity:0.9 }).addTo(map);
+      logEvent(`${t.id} dispatched to ${target.id} (${target.priority}) — route plotted.`, 'warn');
+    });
+  }
+  tryAssign();
+
+  let simSeconds=0;
+  function fmtT(s){ return `T+${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+
+  function tick(){
+    simSeconds++;
+    document.getElementById('simClockPlate').textContent = fmtT(simSeconds);
+
+    drones.forEach(d=>{
+      if(d.status==='PATROL'){
+        d.angle += d.def.speed*0.05;
+        const x = d.def.center[0]+Math.cos(d.angle)*d.def.radius;
+        const y = d.def.center[1]+Math.sin(d.angle)*d.def.radius*0.7;
+        d.marker.setLatLng([y,x]);
+        d.battery -= 0.15;
+        d.sensor = (17+Math.random()*6).toFixed(1)+'°C thermal';
+        if(d.battery<=20 && d.status!=='RTB'){ d.status='RETURNING TO BASE'; logEvent(`${d.id} battery critical (${d.battery.toFixed(0)}%) — returning to base.`,'warn'); }
+      } else if(d.status==='RETURNING TO BASE'){
+        d.battery -= 0.05;
+        if(d.battery<=5){ d.status='CHARGING'; d.battery=5; logEvent(`${d.id} landed at base — charging.`,'info'); }
+      } else if(d.status==='CHARGING'){
+        d.battery += 1.2;
+        if(d.battery>=95){ d.status='PATROL'; logEvent(`${d.id} recharged — resuming patrol.`,'ok'); }
+      }
+    });
+
+    teams.forEach(t=>{
+      if(t.assignedVictim){
+        const target = t.assignedVictim.location;
+        const dx=target[0]-t.location[0], dy=target[1]-t.location[1], d=Math.hypot(dx,dy);
+        if(d>6){
+          t.location[0]+=dx/d*4.5; t.location[1]+=dy/d*4.5;
+          t.marker.setLatLng([t.location[1],t.location[0]]);
+          const angleDeg = Math.atan2(dy,dx)*180/Math.PI+90;
+          const el = t.marker.getElement(); if(el){ const tri = el.querySelector('.team-icon'); if(tri) tri.style.transform=`rotate(${angleDeg}deg)`; }
+          if(t.line) t.line.setLatLngs([[t.location[1],t.location[0]],[target[1],target[0]]]);
+        } else {
+          t.assignedVictim.status='RESCUED'; rescuedCount++;
+          t.assignedVictim.marker.setIcon(victimIcon(t.assignedVictim.priority, true));
+          logEvent(`${t.assignedVictim.id} rescued by ${t.id}. Transporting to nearest shelter.`,'ok');
+          if(t.line){ map.removeLayer(t.line); t.line=null; }
+          t.assignedVictim=null; t.availability='AVAILABLE';
+        }
+      }
+    });
+    tryAssign();
+    updateStats();
+  }
+
+  function updateStats(){
+    const activeDrones = drones.filter(d=>d.status==='PATROL').length;
+    document.getElementById('statDrones').textContent = `${activeDrones}/${drones.length}`;
+    const unrescued = victims.filter(v=>v.status==='UNRESCUED').length;
+    document.getElementById('statVictims').textContent = unrescued;
+    const deployed = teams.filter(t=>t.availability==='DEPLOYED').length;
+    document.getElementById('statTeams').textContent = `${deployed}/${teams.length}`;
+    const totalCap = shelters.reduce((a,s)=>a+s.capacity,0), totalOcc = shelters.reduce((a,s)=>a+s.occupancy,0);
+    document.getElementById('statShelter').textContent = Math.round(totalOcc/totalCap*100)+'%';
+    document.getElementById('statRescued').textContent = rescuedCount;
+  }
+  updateStats();
+  refreshTicker();
+  setInterval(tick, 900);
+
+  function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+  tickClock(); setInterval(tickClock, 1000);
+
+  window.addEventListener('resize', ()=>map.invalidateSize());
+}
+</script>
+</body>
+</html>
