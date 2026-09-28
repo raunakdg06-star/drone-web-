@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <style>
 :root{
   --ink:#0e0c09;
@@ -108,7 +109,7 @@ html.has-custom-cursor, html.has-custom-cursor *{ cursor:none !important; }
 #skipBtn:hover{ background:transparent; color:var(--paper); }
 
 /* ---------------- DASHBOARD ---------------- */
-#dashboard{ position:fixed; inset:0; opacity:0; pointer-events:none; display:grid; grid-template-rows:32px 78px 1fr; background:var(--ink); }
+#dashboard{ position:fixed; inset:0; opacity:0; pointer-events:none; display:grid; grid-template-rows:32px 78px auto 1fr; background:var(--ink); }
 #dashboard.live{ pointer-events:auto; }
 
 header{
@@ -119,10 +120,13 @@ header .brand{ display:flex; align-items:baseline; gap:14px; }
 header .brand h1{ font-family:var(--font-poster); font-weight:400; font-size:26px; letter-spacing:1px; color:var(--paper); }
 header .brand .sub{ font-family:var(--font-cond); font-size:11px; letter-spacing:2px; color:var(--paper-dim); text-transform:uppercase; }
 header .status{ display:flex; align-items:center; gap:24px; font-family:var(--font-cond); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:12px; }
-header .status .seal{
-  width:11px; height:11px; border:2px solid var(--moss); border-radius:50%; position:relative;
-}
-header .status .seal::after{ content:''; position:absolute; inset:2px; background:var(--moss); border-radius:50%; animation:blink 1.8s infinite; }
+header .status .seal{ --seal:var(--brass); width:11px; height:11px; border:2px solid var(--seal); border-radius:50%; position:relative; }
+header .status .seal::after{ content:''; position:absolute; inset:2px; background:var(--seal); border-radius:50%; }
+header .status .seal.live{ --seal:var(--moss); }
+header .status .seal.wait{ --seal:var(--gold); }
+header .status .seal.live::after, header .status .seal.wait::after{ animation:blink 1.8s infinite; }
+header .status .item span{ color:var(--paper); }
+header .status .item #uplink{ min-width:42px; display:inline-block; }
 @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.15;} }
 header .status .item{ display:flex; align-items:center; gap:8px; color:var(--paper-dim); }
 header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; color:var(--paper); letter-spacing:1px; }
@@ -224,6 +228,27 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
   #sidebarLeft, #sidebarRight{ border:none; border-top:2px solid var(--paper); max-height:180px; }
   #mapWrap{ border-right:none; }
 }
+
+/* ---------------- live-data additions ---------------- */
+.leaflet-marker-icon.glide{ transition:transform 1s linear; }
+.leaflet-zoom-anim .leaflet-marker-icon.glide{ transition:transform .25s cubic-bezier(0,0,.25,1); }
+.drone-icon.idle{ opacity:.5; }
+.drone-icon.hw .reticle{ border-color:var(--paper); }
+.drone-icon.hw .dot{ background:var(--paper); }
+.drone-icon.hw .spin{ border-top-color:var(--paper); }
+.drone-icon.hw .idlabel{ top:26px; color:var(--paper); border-color:var(--paper); }
+.victim-icon.low{ background:var(--brass); }
+#mapOverlay{ position:absolute; inset:14px; z-index:460; background:rgba(14,12,9,.9); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center; padding:24px; gap:14px; }
+#mapOverlay[hidden]{ display:none; }
+#mapOverlay .ov-title{ font-family:var(--font-poster); font-size:34px; letter-spacing:2px; color:var(--gold); }
+#mapOverlay .ov-body{ font-family:var(--font-body); font-size:13px; line-height:1.6; color:var(--paper-dim); max-width:420px; }
+#mapOverlay .ov-bar{ width:260px; height:4px; background:var(--line); overflow:hidden; position:relative; }
+#mapOverlay .ov-bar i{ position:absolute; top:0; bottom:0; width:40%; background:var(--gold); animation:ovSlide 1.4s ease-in-out infinite; }
+@keyframes ovSlide{ 0%{ left:-40%; } 100%{ left:100%; } }
+#mapOverlay button{ margin-top:6px; cursor:pointer; background:transparent; color:var(--paper); border:2px solid var(--paper);
+  font-family:var(--font-cond); font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; padding:9px 18px; }
+#mapOverlay button:hover{ background:var(--paper); color:var(--ink); }
 </style>
 </head>
 <body>
@@ -314,8 +339,8 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
       <div class="sub">Disaster Response Command — Sector 07</div>
     </div>
     <div class="status">
-      <div class="item"><div class="seal"></div> Socket.io — Live</div>
-      <div class="item">Uplink 18ms</div>
+      <div class="item"><div class="seal" id="connSeal"></div> <span id="connLabel">STARTING…</span></div>
+      <div class="item">Uplink <span id="uplink">—</span></div>
       <div class="clock" id="clock">00:00:00</div>
     </div>
   </header>
@@ -339,6 +364,7 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
           <div class="row"><span class="idx">04</span><span class="swatch" style="background:var(--moss); clip-path:polygon(50% 0,100% 100%,0 100%);"></span> Rescue team</div>
           <div class="row"><span class="idx">05</span><span class="swatch" style="background:var(--gold)"></span> Shelter</div>
           <div class="row"><span class="idx">06</span><span class="swatch" style="background:var(--ink); border-color:var(--gold); transform:rotate(45deg);"></span> Resource cache</div>
+          <div class="row"><span class="idx">07</span><span class="swatch" style="background:var(--paper)"></span> Drone — hardware link</div>
         </div>
       </div>
       <div>
@@ -353,6 +379,12 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
       <div class="corner-tick bl"></div><div class="corner-tick br"></div>
       <div id="mapCaption">Grid Ref <b>DL-7734</b></div>
       <div id="simClockPlate">T+00:00</div>
+      <div id="mapOverlay" hidden>
+        <div class="ov-title">WAKING THE BACKEND…</div>
+        <div class="ov-body">The free-tier server sleeps when nobody is using it, so the first visit can take 30–60 seconds. The map goes live the moment it answers.</div>
+        <div class="ov-bar"><i></i></div>
+        <button id="ovSkip">Use the offline demo instead</button>
+      </div>
 
       <div id="detailDrawer">
         <div class="head"><h3 id="detailTitle">ENTITY DETAIL</h3><div class="close" id="detailClose">Close ✕</div></div>
@@ -385,6 +417,24 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
   c.style.backgroundSize='160px 160px';
   c.getContext('2d').clearRect(0,0,160,160);
 })();
+
+/* ---------------- BACKEND CONNECTION (config + early wake-up) ---------------- */
+const QS = new URLSearchParams(location.search);
+// Override with ?backend=http://localhost:4000 while developing, or ?offline to skip the backend.
+const BACKEND_URL = (QS.get('backend') || 'https://outpost-backend-d1xr.onrender.com').replace(/\/$/, '');
+const FORCE_OFFLINE = QS.has('offline');
+const warmup = { snapshot:null, failed:false, promise:Promise.resolve(null) };
+if(!FORCE_OFFLINE){
+  // Ask for the world state right away. On a sleeping free-tier server this also wakes it,
+  // and the request keeps running while the intro animation plays.
+  const ctrl = new AbortController();
+  const giveUp = setTimeout(()=>ctrl.abort(), 75000);
+  warmup.promise = fetch(BACKEND_URL + '/api/state', { signal:ctrl.signal })
+    .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(s => { warmup.snapshot = s; return s; })
+    .catch(() => { warmup.failed = true; return null; })
+    .finally(() => clearTimeout(giveUp));
+}
 
 /* ---------------- CUSTOM CURSOR: drone follows the pointer, banks toward motion ---------------- */
 (function(){
@@ -529,13 +579,404 @@ function playHeroDrone(onDone){
 })();
 
 /* =========================================================================
-   DASHBOARD — Leaflet tactical map, flat markers, simulated real-time engine
+   SIMULATION ENGINE — embedded copy of backend/sim/engine.js (used for the offline demo).
+   Keep in sync with the backend file if you change the simulation.
+   ========================================================================= */
+// <ENGINE-EMBED-START>
+/**
+ * OUTPOST simulation engine.
+ *
+ * Pure logic, no I/O: it owns the "world" (drones, victims, rescue teams,
+ * shelters, resources, zones) and advances it one tick at a time. Every
+ * change is reported through an `emit(type, payload)` callback.
+ *
+ *  - On the server (backend/server.js) emit() broadcasts over Socket.io.
+ *  - In the browser (frontend/index.html embeds a copy of this file) emit()
+ *    drives the map directly, which is the offline-demo fallback.
+ *
+ * Positions are kept in "map space" (0..1000 on both axes, y = north).
+ * Every entity also carries real-world GPS, projected through a bounding box
+ * around MAP_CENTER, so a physical drone posting real lat/lng lands in the
+ * right place on the map.
+ *
+ * Events emitted: drone, victim, team, shelter, victim:remove, stats, feed
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.OutpostEngine = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  var HARDWARE_TIMEOUT_MS = 15000;
+  var VALID_STATUS = ['PATROL', 'RETURNING_TO_BASE', 'CHARGING', 'GROUNDED', 'OFFLINE'];
+  var PRIORITY_BONUS = { CRITICAL: 300, HIGH: 150, MODERATE: 0, LOW: -100 };
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function clamp1000(v) { return Math.max(0, Math.min(1000, v)); }
+  function round1(v) { return Math.round(v * 10) / 10; }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function heading(dx, dy) { return (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360; }
+
+  function pointInPolygon(p, pts) {
+    var inside = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      var hit = (yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi;
+      if (hit) inside = !inside;
+    }
+    return inside;
+  }
+
+  function create(opts) {
+    opts = opts || {};
+    var center = opts.center || { lat: 22.5726, lng: 88.3639 };
+    var span = opts.spanDeg || 0.05; // degrees of lat/lng covered by the 1000x1000 map
+
+    function toGps(pos) {
+      return {
+        lat: center.lat - span / 2 + (pos.y / 1000) * span,
+        lng: center.lng - span / 2 + (pos.x / 1000) * span
+      };
+    }
+    function fromGps(g) {
+      return {
+        x: ((g.lng - (center.lng - span / 2)) / span) * 1000,
+        y: ((g.lat - (center.lat - span / 2)) / span) * 1000
+      };
+    }
+
+    /* ------------------------------ world ------------------------------ */
+    var state = {
+      tick: 0,
+      rescued: 0,
+      victimSeq: 1,
+      zones: [
+        { id: 'ZN-01', name: 'Riverside Flood Zone', type: 'FLOOD', severity: 'SEVERE', color: '#5f8fa3',
+          pts: [[120, 760], [260, 690], [420, 700], [440, 860], [260, 900], [130, 860]] },
+        { id: 'ZN-02', name: 'Warehouse District Collapse', type: 'COLLAPSE', severity: 'CRITICAL', color: '#a8342b',
+          pts: [[640, 300], [760, 280], [790, 400], [700, 440], [620, 400]] },
+        { id: 'ZN-03', name: 'Northside Fire Perimeter', type: 'FIRE', severity: 'ACTIVE', color: '#d6923e',
+          pts: [[300, 120], [420, 140], [440, 240], [330, 260], [270, 200]] }
+      ],
+      shelters: [
+        { id: 'SHL-01', pos: { x: 80, y: 950 }, capacity: 200, occupancy: 126 },
+        { id: 'SHL-02', pos: { x: 900, y: 900 }, capacity: 150, occupancy: 94 },
+        { id: 'SHL-03', pos: { x: 900, y: 80 }, capacity: 180, occupancy: 60 }
+      ],
+      resources: [
+        { id: 'RES-MED-1', pos: { x: 250, y: 700 }, type: 'Medical', quantity: 40 },
+        { id: 'RES-WTR-1', pos: { x: 650, y: 450 }, type: 'Water', quantity: 120 },
+        { id: 'RES-FUEL-1', pos: { x: 480, y: 150 }, type: 'Fuel/Power', quantity: 60 }
+      ],
+      drones: [],
+      victims: [],
+      teams: []
+    };
+
+    [
+      { id: 'DRN-01', c: [300, 780], r: 110, s: 0.55, a: 0, b: 78 },
+      { id: 'DRN-02', c: [700, 360], r: 90, s: 0.7, a: 2, b: 61 },
+      { id: 'DRN-03', c: [370, 190], r: 70, s: 0.9, a: 4, b: 38 },
+      { id: 'DRN-04', c: [550, 600], r: 130, s: 0.4, a: 1, b: 90 }
+    ].forEach(function (d) {
+      state.drones.push({
+        id: d.id, source: 'sim', status: 'PATROL', battery: d.b, angle: d.a,
+        def: { center: d.c, radius: d.r, speed: d.s },
+        pos: { x: d.c[0] + Math.cos(d.a) * d.r, y: d.c[1] + Math.sin(d.a) * d.r * 0.7 },
+        heading: 0, alt: 40, dock: null, gps: null, offMap: false, lastHardwareAt: 0,
+        sensor: { thermalReading: 20, gasReading: 400, signalStrength: -55 }
+      });
+    });
+
+    [[200, 800, 'CRITICAL'], [260, 850, 'HIGH'], [150, 820, 'MODERATE'], [700, 340, 'CRITICAL'],
+     [730, 410, 'HIGH'], [340, 180, 'MODERATE'], [400, 220, 'HIGH'], [580, 610, 'MODERATE']
+    ].forEach(function (v) { newVictim({ x: v[0], y: v[1] }, v[2]); });
+
+    [['TEAM-ALPHA', 420, 900], ['TEAM-BRAVO', 850, 300], ['TEAM-CHARLIE', 500, 100]].forEach(function (t) {
+      state.teams.push({ id: t[0], pos: { x: t[1], y: t[2] }, availability: 'AVAILABLE', victimId: null, heading: 0 });
+    });
+
+    function newVictim(pos, priority) {
+      var v = { id: 'VIC-' + pad2(state.victimSeq++), pos: { x: pos.x, y: pos.y }, priority: priority, status: 'UNRESCUED', teamId: null };
+      state.victims.push(v);
+      return v;
+    }
+    function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+    function nearestShelter(pos) {
+      return state.shelters.slice().sort(function (a, b) { return dist(pos, a.pos) - dist(pos, b.pos); })[0];
+    }
+
+    /* --------------------------- wire formats --------------------------- */
+    function wireDrone(d) {
+      var gps = d.source === 'hardware' && d.gps ? d.gps : toGps(d.pos);
+      return {
+        id: d.id, source: d.source, status: d.status, offMap: !!d.offMap,
+        pos: { x: d.pos.x, y: d.pos.y },
+        gps: { lat: gps.lat, lng: gps.lng, altitude: round1(d.alt), heading: Math.round(d.heading) },
+        battery: round1(d.battery),
+        sensor: { thermalReading: round1(d.sensor.thermalReading), gasReading: Math.round(d.sensor.gasReading), signalStrength: Math.round(d.sensor.signalStrength) }
+      };
+    }
+    function wireVictim(v) {
+      return { id: v.id, pos: { x: v.pos.x, y: v.pos.y }, gps: toGps(v.pos), priority: v.priority, status: v.status, teamId: v.teamId };
+    }
+    function wireTeam(t) {
+      return { id: t.id, pos: { x: t.pos.x, y: t.pos.y }, gps: toGps(t.pos), availability: t.availability, victimId: t.victimId, heading: Math.round(t.heading) };
+    }
+    function shelterStatus(s) {
+      var r = s.occupancy / s.capacity;
+      return r >= 1 ? 'FULL' : r > 0.85 ? 'NEAR_FULL' : 'OPEN';
+    }
+    function wireShelter(s) {
+      return { id: s.id, pos: { x: s.pos.x, y: s.pos.y }, gps: toGps(s.pos), capacity: s.capacity, occupancy: s.occupancy, status: shelterStatus(s) };
+    }
+    function wireResource(r) {
+      return { id: r.id, pos: { x: r.pos.x, y: r.pos.y }, gps: toGps(r.pos), type: r.type, quantity: r.quantity, status: 'AVAILABLE' };
+    }
+    function wireZone(z) {
+      return { id: z.id, name: z.name, type: z.type, severity: z.severity, color: z.color, pts: z.pts.map(function (p) { return [p[0], p[1]]; }) };
+    }
+
+    function snapshot() {
+      return {
+        serverTime: Date.now(),
+        stats: { rescued: state.rescued },
+        config: { center: center, spanDeg: span },
+        drones: state.drones.map(wireDrone),
+        victims: state.victims.map(wireVictim),
+        teams: state.teams.map(wireTeam),
+        shelters: state.shelters.map(wireShelter),
+        resources: state.resources.map(wireResource),
+        zones: state.zones.map(wireZone)
+      };
+    }
+
+    /* ------------------------------- tick ------------------------------- */
+    function feed(emit, msg, level) { emit('feed', { msg: msg, level: level || 'info', t: Date.now() }); }
+
+    function stepDrone(d, emit) {
+      var before = { x: d.pos.x, y: d.pos.y };
+
+      if (d.status === 'PATROL') {
+        var target = {
+          x: d.def.center[0] + Math.cos(d.angle + d.def.speed * 0.08) * d.def.radius,
+          y: d.def.center[1] + Math.sin(d.angle + d.def.speed * 0.08) * d.def.radius * 0.7
+        };
+        if (dist(d.pos, target) > 30) {
+          // coming back from a charge: fly to the patrol circle instead of teleporting
+          var dd = dist(d.pos, target);
+          d.pos.x += (target.x - d.pos.x) / dd * 30;
+          d.pos.y += (target.y - d.pos.y) / dd * 30;
+        } else {
+          d.angle += d.def.speed * 0.08;
+          d.pos.x = target.x; d.pos.y = target.y;
+        }
+        d.battery -= 0.35;
+        if (d.battery <= 22) {
+          d.status = 'RETURNING_TO_BASE';
+          d.dock = nearestShelter(d.pos);
+          feed(emit, d.id + ' battery critical (' + Math.round(d.battery) + '%) — returning to ' + d.dock.id + '.', 'warn');
+        }
+      } else if (d.status === 'RETURNING_TO_BASE') {
+        var dock = d.dock || nearestShelter(d.pos);
+        var dr = dist(d.pos, dock.pos);
+        if (dr > 8) {
+          d.pos.x += (dock.pos.x - d.pos.x) / dr * Math.min(30, dr);
+          d.pos.y += (dock.pos.y - d.pos.y) / dr * Math.min(30, dr);
+          d.battery = Math.max(3, d.battery - 0.1);
+        } else {
+          d.pos.x = dock.pos.x; d.pos.y = dock.pos.y;
+          d.status = 'CHARGING';
+          feed(emit, d.id + ' docked at ' + dock.id + ' — charging.', 'info');
+        }
+      } else if (d.status === 'CHARGING') {
+        d.battery += 1.5;
+        if (d.battery >= 95) {
+          d.battery = 95; d.status = 'PATROL';
+          feed(emit, d.id + ' recharged — resuming patrol.', 'ok');
+        }
+      }
+
+      var mx = d.pos.x - before.x, my = d.pos.y - before.y;
+      if (Math.hypot(mx, my) > 0.5) d.heading = heading(mx, my);
+      d.alt = 40 + Math.sin(state.tick / 5 + d.angle) * 5;
+      d.sensor = {
+        thermalReading: 17 + Math.random() * 6,
+        gasReading: 380 + Math.random() * 40,
+        signalStrength: -50 - Math.random() * 20
+      };
+    }
+
+    function assignTeams(emit) {
+      state.teams.forEach(function (t) {
+        if (t.availability !== 'AVAILABLE') return;
+        var open = state.victims.filter(function (v) { return v.status === 'UNRESCUED'; });
+        if (!open.length) return;
+        // triage: closer victims first, but critical cases pull harder
+        open.sort(function (a, b) {
+          return (dist(t.pos, a.pos) - PRIORITY_BONUS[a.priority]) - (dist(t.pos, b.pos) - PRIORITY_BONUS[b.priority]);
+        });
+        var v = open[0];
+        v.status = 'ASSIGNED'; v.teamId = t.id;
+        t.victimId = v.id; t.availability = 'DEPLOYED';
+        emit('victim', wireVictim(v));
+        emit('team', wireTeam(t));
+        feed(emit, t.id + ' dispatched to ' + v.id + ' (' + v.priority + ') — route plotted.', 'warn');
+      });
+    }
+
+    function stepTeam(t, emit) {
+      if (!t.victimId) return;
+      var v = byId(state.victims, t.victimId);
+      if (!v) { t.victimId = null; t.availability = 'AVAILABLE'; emit('team', wireTeam(t)); return; }
+      var d = dist(t.pos, v.pos);
+      if (d > 8) {
+        var step = Math.min(7, d);
+        t.heading = heading(v.pos.x - t.pos.x, v.pos.y - t.pos.y);
+        t.pos.x += (v.pos.x - t.pos.x) / d * step;
+        t.pos.y += (v.pos.y - t.pos.y) / d * step;
+        emit('team', wireTeam(t));
+      } else {
+        v.status = 'RESCUED';
+        state.rescued++;
+        var shelter = nearestShelter(v.pos);
+        if (shelter.occupancy < shelter.capacity) { shelter.occupancy++; emit('shelter', wireShelter(shelter)); }
+        t.victimId = null; t.availability = 'AVAILABLE';
+        emit('victim', wireVictim(v));
+        emit('team', wireTeam(t));
+        emit('stats', { rescued: state.rescued });
+        feed(emit, v.id + ' rescued by ' + t.id + ' — transported to ' + shelter.id + '.', 'ok');
+      }
+    }
+
+    function maybeSpawnVictim(emit) {
+      if (state.tick % 25 !== 0) return;
+      var openCount = state.victims.filter(function (v) { return v.status !== 'RESCUED'; }).length;
+      if (openCount >= 7) return;
+      var zone = state.zones[Math.floor(Math.random() * state.zones.length)];
+      var xs = zone.pts.map(function (p) { return p[0]; }), ys = zone.pts.map(function (p) { return p[1]; });
+      var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+      var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+      var pos = null;
+      for (var i = 0; i < 40 && !pos; i++) {
+        var p = { x: minX + Math.random() * (maxX - minX), y: minY + Math.random() * (maxY - minY) };
+        if (pointInPolygon(p, zone.pts)) pos = p;
+      }
+      if (!pos) return;
+      var roll = Math.random();
+      var v = newVictim(pos, roll < 0.25 ? 'CRITICAL' : roll < 0.65 ? 'HIGH' : 'MODERATE');
+      var scout = state.drones.filter(function (d) { return d.status === 'PATROL'; })
+        .sort(function (a, b) { return dist(a.pos, pos) - dist(b.pos, pos); })[0];
+      emit('victim', wireVictim(v));
+      feed(emit, (scout ? scout.id : 'A drone') + ' thermal signature confirmed — ' + v.id + ' (' + v.priority + ') logged in ' + zone.name + '.', 'crit');
+    }
+
+    function pruneVictims(emit) {
+      while (state.victims.length > 24) {
+        var idx = -1;
+        for (var i = 0; i < state.victims.length; i++) if (state.victims[i].status === 'RESCUED') { idx = i; break; }
+        if (idx < 0) break;
+        var gone = state.victims.splice(idx, 1)[0];
+        emit('victim:remove', { id: gone.id });
+      }
+    }
+
+    function tick(emit) {
+      state.tick++;
+      var now = Date.now();
+      state.drones.forEach(function (d) {
+        if (d.source === 'hardware') {
+          if (now - d.lastHardwareAt < HARDWARE_TIMEOUT_MS) return; // real telemetry is in charge
+          if (d.def) {
+            d.source = 'sim'; d.gps = null; d.offMap = false;
+            feed(emit, d.id + ' telemetry lost — falling back to simulation.', 'warn');
+          } else {
+            if (d.status !== 'OFFLINE') {
+              d.status = 'OFFLINE';
+              feed(emit, d.id + ' telemetry link lost.', 'warn');
+              emit('drone', wireDrone(d));
+            }
+            return;
+          }
+        }
+        stepDrone(d, emit);
+        emit('drone', wireDrone(d));
+      });
+      state.teams.forEach(function (t) { stepTeam(t, emit); });
+      assignTeams(emit);
+      maybeSpawnVictim(emit);
+      pruneVictims(emit);
+    }
+
+    /* ---------------------- external inputs (hardware) ---------------------- */
+    // A real drone reports { droneId, gps:{lat,lng,altitude,heading}, battery, status, sensorData }.
+    function ingestDrone(p, emit) {
+      var d = byId(state.drones, p.droneId);
+      var first = false;
+      if (!d) {
+        d = { id: p.droneId, def: null, angle: 0, dock: null, heading: 0, alt: 0, battery: 100, status: 'PATROL',
+              sensor: { thermalReading: 0, gasReading: 0, signalStrength: 0 }, pos: { x: 500, y: 500 } };
+        state.drones.push(d);
+      }
+      if (d.source !== 'hardware') first = true;
+      d.source = 'hardware';
+      d.lastHardwareAt = Date.now();
+      var g = p.gps || {};
+      d.gps = { lat: Number(g.lat), lng: Number(g.lng) };
+      var raw = fromGps(d.gps);
+      d.offMap = raw.x < 0 || raw.x > 1000 || raw.y < 0 || raw.y > 1000;
+      d.pos = { x: clamp1000(raw.x), y: clamp1000(raw.y) };
+      if (g.altitude != null) d.alt = Number(g.altitude);
+      if (g.heading != null) d.heading = Number(g.heading);
+      if (p.battery != null) d.battery = Math.max(0, Math.min(100, Number(p.battery)));
+      d.status = VALID_STATUS.indexOf(p.status) >= 0 ? p.status : 'PATROL';
+      var s = p.sensorData || {};
+      d.sensor = {
+        thermalReading: s.thermalReading != null ? Number(s.thermalReading) : d.sensor.thermalReading,
+        gasReading: s.gasReading != null ? Number(s.gasReading) : d.sensor.gasReading,
+        signalStrength: s.signalStrength != null ? Number(s.signalStrength) : d.sensor.signalStrength
+      };
+      if (first) feed(emit, d.id + ' hardware telemetry link established — live GPS.', 'ok');
+      if (d.sensor.thermalReading > 36 && Date.now() - (d.lastHeatAlert || 0) > 10000) {
+        d.lastHeatAlert = Date.now();
+        feed(emit, d.id + ' possible heat signature (' + round1(d.sensor.thermalReading) + '°C) — verify on site.', 'crit');
+      }
+      var w = wireDrone(d);
+      emit('drone', w);
+      return w;
+    }
+
+    // Log a victim from outside (dispatcher, or a drone detection pipeline).
+    function addVictim(spec, emit) {
+      var pos = spec.lat != null && spec.lng != null ? fromGps({ lat: Number(spec.lat), lng: Number(spec.lng) }) : { x: Number(spec.x), y: Number(spec.y) };
+      pos = { x: clamp1000(pos.x), y: clamp1000(pos.y) };
+      var pr = ['CRITICAL', 'HIGH', 'MODERATE', 'LOW'].indexOf(spec.priority) >= 0 ? spec.priority : 'MODERATE';
+      var v = newVictim(pos, pr);
+      var w = wireVictim(v);
+      emit('victim', w);
+      feed(emit, v.id + ' (' + v.priority + ') reported at ' + w.gps.lat.toFixed(4) + ', ' + w.gps.lng.toFixed(4) + '.', 'crit');
+      return w;
+    }
+
+    return { snapshot: snapshot, tick: tick, ingestDrone: ingestDrone, addVictim: addVictim, toGps: toGps, fromGps: fromGps, state: state };
+  }
+
+  return { create: create };
+});
+// <ENGINE-EMBED-END>
+
+/* =========================================================================
+   DASHBOARD — Leaflet tactical map.
+   Data comes from the live backend over Socket.io. If the backend can't be
+   reached, the very same simulation engine (embedded above) runs in the
+   browser instead, and the header says so.
    ========================================================================= */
 let dashboardInitialized = false;
 function initDashboard(){
   if(dashboardInitialized) return;
   dashboardInitialized = true;
 
+  /* ---------- procedural tactical basemap ---------- */
   const W=1000,H=1000;
   const bm = document.createElement('canvas'); bm.width=W; bm.height=H;
   const bctx = bm.getContext('2d');
@@ -557,197 +998,296 @@ function initDashboard(){
   bctx.strokeStyle='rgba(255,255,255,0.03)'; bctx.lineWidth=1;
   for(let i=0;i<=1000;i+=50){ bctx.beginPath();bctx.moveTo(i,0);bctx.lineTo(i,1000);bctx.stroke();
     bctx.beginPath();bctx.moveTo(0,i);bctx.lineTo(1000,i);bctx.stroke(); }
-  const basemapURL = bm.toDataURL();
 
   const bounds=[[0,0],[1000,1000]];
   const map = L.map('map', { crs:L.CRS.Simple, minZoom:-1, maxZoom:3, zoomControl:false, attributionControl:false });
-  L.imageOverlay(basemapURL, bounds).addTo(map);
+  L.imageOverlay(bm.toDataURL(), bounds).addTo(map);
   map.fitBounds(bounds); map.setView([500,500],0);
   L.control.zoom({ position:'bottomright' }).addTo(map);
 
-  const zones = [
-    { name:'Riverside Flood Zone', color:'#5f8fa3', pts:[[120,760],[260,690],[420,700],[440,860],[260,900],[130,860]], sev:'SEVERE' },
-    { name:'Warehouse District Collapse', color:'#a8342b', pts:[[640,300],[760,280],[790,400],[700,440],[620,400]], sev:'CRITICAL' },
-    { name:'Northside Fire Perimeter', color:'#d6923e', pts:[[300,120],[420,140],[440,240],[330,260],[270,200]], sev:'ACTIVE' }
-  ];
-  zones.forEach(z=>{
-    L.polygon(z.pts.map(p=>[p[1],p[0]]), { color:z.color, weight:2, fillColor:z.color, fillOpacity:0.14, dashArray:'6,4' })
-      .addTo(map).bindTooltip(z.name+' — '+z.sev, { className:'field-tip', direction:'top' });
-  });
-  document.getElementById('zoneList').innerHTML = zones.map(z=>
-    `<div class="zonerow"><span>${z.name}</span><b style="color:${z.color}">${z.sev}</b></div>`).join('');
+  /* ---------- state + map layers, keyed by entity id ---------- */
+  const world  = { drones:new Map(), victims:new Map(), teams:new Map(), shelters:new Map(), resources:new Map(), rescued:0 };
+  const layers = { drones:new Map(), victims:new Map(), teams:new Map(), shelters:new Map(), resources:new Map(), routes:new Map(), zones:[] };
+  let detail = null; // { type, id } of the entity shown in the drawer
 
-  const droneDefs = [
-    { id:'DRN-01', center:[300,780], radius:110, speed:0.55, phase:0 },
-    { id:'DRN-02', center:[700,360], radius:90,  speed:0.7,  phase:2 },
-    { id:'DRN-03', center:[370,190], radius:70,  speed:0.9,  phase:4 },
-    { id:'DRN-04', center:[550,600], radius:130, speed:0.4,  phase:1 },
-  ];
-  const drones = droneDefs.map(d=>({ id:d.id, def:d, angle:d.phase, battery:60+Math.random()*35,
-    status:'PATROL', sensor:(18+Math.random()*4).toFixed(1)+'°C thermal', marker:null }));
+  const ll = (p) => [p.y, p.x];
+  const pretty = (s) => String(s).replace(/_/g,' ');
+  const fmtGps = (g) => g.lat.toFixed(5) + ', ' + g.lng.toFixed(5);
+  const tip = (m, text) => m.setTooltipContent(text);
+  function glide(m){ const el = m.getElement(); if(el) el.classList.add('glide'); }
 
-  let victimSeq=1;
-  function makeVictim(loc,priority){ return { id:'VIC-'+String(victimSeq++).padStart(2,'0'), location:loc, priority, status:'UNRESCUED', marker:null }; }
-  const victims = [
-    makeVictim([200,800],'CRITICAL'), makeVictim([260,850],'HIGH'), makeVictim([150,820],'MODERATE'),
-    makeVictim([700,340],'CRITICAL'), makeVictim([730,410],'HIGH'),
-    makeVictim([340,180],'MODERATE'), makeVictim([400,220],'HIGH'),
-    makeVictim([580,610],'MODERATE')
-  ];
-  let rescuedCount = 0;
+  /* ---------- icons ---------- */
+  const isIdle = (d) => d.status==='CHARGING' || d.status==='OFFLINE';
+  const droneKey = (d) => (d.source==='hardware'?'hw':'sim') + (isIdle(d)?'-idle':'');
+  function droneIcon(d){
+    const hw = d.source==='hardware';
+    const cls = 'drone-icon' + (hw?' hw':'') + (isIdle(d)?' idle':'');
+    return L.divIcon({ className:'', iconSize:[22,22], iconAnchor:[11,11],
+      html:`<div class="${cls}"><div class="spin"></div><div class="reticle"></div><div class="dot"></div>${hw?`<div class="idlabel">${d.id} · HW</div>`:''}</div>` });
+  }
+  const victimKey = (v) => v.status==='RESCUED' ? 'rescued' : v.priority;
+  function victimIcon(v){
+    const cls = v.status==='RESCUED' ? 'rescued' : v.priority.toLowerCase();
+    return L.divIcon({ className:'', html:`<div class="victim-icon ${cls}"></div>`, iconSize:[16,16], iconAnchor:[8,8] });
+  }
+  const teamIcon = (t) => L.divIcon({ className:'', html:`<div class="team-icon" style="transform:rotate(${t.heading||0}deg)"></div>`, iconSize:[18,18], iconAnchor:[9,9] });
+  const shelterIcon  = () => L.divIcon({ className:'', html:`<div class="shelter-icon">S</div>`, iconSize:[22,22], iconAnchor:[11,11] });
+  const resourceIcon = () => L.divIcon({ className:'', html:`<div class="resource-icon"></div>`, iconSize:[16,16], iconAnchor:[8,8] });
 
-  const teamDefs = [{id:'TEAM-ALPHA',loc:[420,900]},{id:'TEAM-BRAVO',loc:[850,300]},{id:'TEAM-CHARLIE',loc:[500,100]}];
-  const teams = teamDefs.map(t=>({ id:t.id, location:[...t.loc], availability:'AVAILABLE', assignedVictim:null, marker:null, line:null }));
+  /* ---------- upserts: create the marker the first time, move/restyle it afterwards ---------- */
+  function upsertShelter(s){
+    world.shelters.set(s.id, s);
+    let m = layers.shelters.get(s.id);
+    if(!m){
+      m = L.marker(ll(s.pos), { icon:shelterIcon() }).addTo(map).bindTooltip('', { className:'field-tip' });
+      m.on('click', ()=>openDetail('shelter', s.id));
+      layers.shelters.set(s.id, m);
+    }
+    tip(m, `${s.id} — ${s.occupancy}/${s.capacity}`);
+  }
+  function upsertResource(r){
+    world.resources.set(r.id, r);
+    if(layers.resources.has(r.id)) return;
+    const m = L.marker(ll(r.pos), { icon:resourceIcon() }).addTo(map).bindTooltip(`${r.id} — ${r.type}`, { className:'field-tip' });
+    m.on('click', ()=>openDetail('resource', r.id));
+    layers.resources.set(r.id, m);
+  }
+  function upsertDrone(d){
+    world.drones.set(d.id, d);
+    let m = layers.drones.get(d.id);
+    const key = droneKey(d);
+    if(!m){
+      m = L.marker(ll(d.pos), { icon:droneIcon(d) }).addTo(map).bindTooltip('', { className:'field-tip' });
+      m._key = key;
+      m.on('click', ()=>openDetail('drone', d.id));
+      layers.drones.set(d.id, m); glide(m);
+    } else {
+      m.setLatLng(ll(d.pos));
+      if(m._key !== key){ m.setIcon(droneIcon(d)); m._key = key; glide(m); }
+    }
+    tip(m, `${d.id} — ${Math.round(d.battery)}% — ${pretty(d.status)}`);
+  }
+  function upsertVictim(v){
+    world.victims.set(v.id, v);
+    let m = layers.victims.get(v.id);
+    const key = victimKey(v);
+    if(!m){
+      m = L.marker(ll(v.pos), { icon:victimIcon(v) }).addTo(map).bindTooltip('', { className:'field-tip' });
+      m._key = key;
+      m.on('click', ()=>openDetail('victim', v.id));
+      layers.victims.set(v.id, m);
+    } else if(m._key !== key){ m.setIcon(victimIcon(v)); m._key = key; }
+    tip(m, `${v.id} — ${v.priority} — ${v.status}`);
+  }
+  function removeVictim(id){
+    const m = layers.victims.get(id);
+    if(m){ map.removeLayer(m); layers.victims.delete(id); }
+    world.victims.delete(id);
+    if(detail && detail.type==='victim' && detail.id===id) closeDetail();
+  }
+  function upsertTeam(t){
+    world.teams.set(t.id, t);
+    let m = layers.teams.get(t.id);
+    if(!m){
+      m = L.marker(ll(t.pos), { icon:teamIcon(t) }).addTo(map).bindTooltip('', { className:'field-tip' });
+      m.on('click', ()=>openDetail('team', t.id));
+      layers.teams.set(t.id, m); glide(m);
+    } else {
+      m.setLatLng(ll(t.pos));
+      const el = m.getElement(), tri = el && el.querySelector('.team-icon');
+      if(tri) tri.style.transform = `rotate(${t.heading||0}deg)`;
+    }
+    tip(m, `${t.id} — ${t.availability}`);
+    // evacuation route: dashed line from the team to the victim it is heading for
+    const target = t.victimId ? world.victims.get(t.victimId) : null;
+    let line = layers.routes.get(t.id);
+    if(target){
+      const pts = [ll(t.pos), ll(target.pos)];
+      if(!line){ line = L.polyline(pts, { color:'#5c7452', weight:3, dashArray:'8,6', opacity:0.9 }).addTo(map); layers.routes.set(t.id, line); }
+      else line.setLatLngs(pts);
+    } else if(line){ map.removeLayer(line); layers.routes.delete(t.id); }
+  }
+  function drawZones(zones){
+    layers.zones.forEach(z => map.removeLayer(z)); layers.zones = [];
+    zones.forEach(z=>{
+      layers.zones.push(L.polygon(z.pts.map(p=>[p[1],p[0]]), { color:z.color, weight:2, fillColor:z.color, fillOpacity:0.14, dashArray:'6,4' })
+        .addTo(map).bindTooltip(z.name+' — '+z.severity, { className:'field-tip', direction:'top' }));
+    });
+    document.getElementById('zoneList').innerHTML = zones.map(z=>
+      `<div class="zonerow"><span>${z.name}</span><b style="color:${z.color}">${z.severity}</b></div>`).join('');
+  }
 
-  const shelters = [
-    { id:'SHL-01', loc:[80,950], capacity:200, occupancy:126 },
-    { id:'SHL-02', loc:[900,900], capacity:150, occupancy:94 },
-    { id:'SHL-03', loc:[900,80], capacity:180, occupancy:60 }
-  ];
-  const resources = [
-    { id:'RES-MED-1', loc:[250,700], type:'Medical' },
-    { id:'RES-WTR-1', loc:[650,450], type:'Water' },
-    { id:'RES-FUEL-1', loc:[480,150], type:'Fuel/Power' }
-  ];
+  function clearAll(){
+    ['drones','victims','teams','shelters','resources','routes'].forEach(k=>{ layers[k].forEach(m=>map.removeLayer(m)); layers[k].clear(); });
+    ['drones','victims','teams','shelters','resources'].forEach(k=>world[k].clear());
+    layers.zones.forEach(z=>map.removeLayer(z)); layers.zones = [];
+  }
+  function applySnapshot(s){
+    clearAll();
+    world.rescued = s.stats ? s.stats.rescued : 0;
+    drawZones(s.zones);
+    s.shelters.forEach(upsertShelter);
+    s.resources.forEach(upsertResource);
+    s.victims.forEach(upsertVictim);   // before teams, so routes can find their target
+    s.drones.forEach(upsertDrone);
+    s.teams.forEach(upsertTeam);
+    updateStats(); renderDetail();
+  }
 
-  function droneIcon(){ return L.divIcon({ className:'', html:`<div class="drone-icon"><div class="spin"></div><div class="reticle"></div><div class="dot"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] }); }
-  function victimIcon(p,rescued){ const cls = rescued?'rescued':p.toLowerCase(); return L.divIcon({ className:'', html:`<div class="victim-icon ${cls}"></div>`, iconSize:[16,16], iconAnchor:[8,8] }); }
-  function teamIcon(){ return L.divIcon({ className:'', html:`<div class="team-icon"></div>`, iconSize:[18,18], iconAnchor:[9,9] }); }
-  function shelterIcon(){ return L.divIcon({ className:'', html:`<div class="shelter-icon">S</div>`, iconSize:[22,22], iconAnchor:[11,11] }); }
-  function resourceIcon(){ return L.divIcon({ className:'', html:`<div class="resource-icon"></div>`, iconSize:[16,16], iconAnchor:[8,8] }); }
+  /* ---------- one place where every event lands (live or offline) ---------- */
+  function handleEvent(type, p){
+    switch(type){
+      case 'drone':         upsertDrone(p); break;
+      case 'victim':        upsertVictim(p); break;
+      case 'team':          upsertTeam(p); break;
+      case 'shelter':       upsertShelter(p); break;
+      case 'victim:remove': removeVictim(p.id); break;
+      case 'stats':         world.rescued = p.rescued; break;
+      case 'feed':          logEvent(p.msg, p.level, p.t); break;
+    }
+    updateStats();
+    if(detail && p && p.id === detail.id) renderDetail();
+  }
 
-  shelters.forEach(s=>{
-    const m = L.marker([s.loc[1],s.loc[0]], { icon:shelterIcon() }).addTo(map).bindTooltip(`${s.id} — ${s.occupancy}/${s.capacity}`, { className:'field-tip' });
-    m.on('click', ()=>showDetail('Shelter', s.id, { Location:`${s.loc[0]}, ${s.loc[1]}`, Capacity:s.capacity, Occupancy:s.occupancy, Status:(s.occupancy/s.capacity>0.85?'NEAR FULL':'OPEN') }));
-  });
-  resources.forEach(r=>{
-    const m = L.marker([r.loc[1],r.loc[0]], { icon:resourceIcon() }).addTo(map).bindTooltip(r.id, { className:'field-tip' });
-    m.on('click', ()=>showDetail('Resource Cache', r.id, { Type:r.type, Location:`${r.loc[0]}, ${r.loc[1]}`, Status:'AVAILABLE' }));
-  });
-  drones.forEach(d=>{
-    d.marker = L.marker([d.def.center[1],d.def.center[0]], { icon:droneIcon() }).addTo(map);
-    d.marker.on('click', ()=>showDetail('Drone', d.id, { GPS:`${d.marker.getLatLng().lng.toFixed(1)}, ${d.marker.getLatLng().lat.toFixed(1)}`, Battery:d.battery.toFixed(0)+'%', Status:d.status, 'Sensor Data':d.sensor }));
-  });
-  victims.forEach(v=>{
-    v.marker = L.marker([v.location[1],v.location[0]], { icon:victimIcon(v.priority,false) }).addTo(map).bindTooltip(`${v.id} — ${v.priority}`, { className:'field-tip' });
-    v.marker.on('click', ()=>showDetail('Victim', v.id, { Location:`${v.location[0]}, ${v.location[1]}`, Priority:v.priority, Status:v.status }));
-  });
-  teams.forEach(t=>{
-    t.marker = L.marker([t.location[1],t.location[0]], { icon:teamIcon() }).addTo(map);
-    t.marker.on('click', ()=>showDetail('Rescue Team', t.id, { Location:`${t.location[0]}, ${t.location[1]}`, Availability:t.availability, 'Assigned Victim': t.assignedVictim?t.assignedVictim.id:'—' }));
-  });
-
+  /* ---------- detail drawer (live-updating) ---------- */
   const drawer = document.getElementById('detailDrawer');
   const detailTitle = document.getElementById('detailTitle');
   const detailGrid = document.getElementById('detailGrid');
-  function showDetail(type,id,fields){
-    detailTitle.textContent = `${type.toUpperCase()} — ${id}`;
-    detailGrid.innerHTML = Object.entries(fields).map(([k,v])=>`<div class="field"><span>${k.toUpperCase()}</span><b>${v}</b></div>`).join('');
-    gsap.to(drawer, { bottom:14, duration:0.45, ease:'power3.out' });
+  function detailData(){
+    if(!detail) return null;
+    const id = detail.id;
+    if(detail.type==='drone'){ const d = world.drones.get(id); if(!d) return null;
+      const f = { GPS:fmtGps(d.gps), Altitude:d.gps.altitude+' m', Heading:d.gps.heading+'°', Battery:Math.round(d.battery)+'%', Status:pretty(d.status),
+                  Thermal:d.sensor.thermalReading+'°C', 'Gas (ppm)':d.sensor.gasReading, Signal:d.sensor.signalStrength+' dBm',
+                  Source: d.source==='hardware' ? 'HARDWARE LINK' : 'SIMULATED' };
+      if(d.offMap) f.Note = 'OUTSIDE MAP AREA';
+      return { title:'DRONE — '+id, f }; }
+    if(detail.type==='victim'){ const v = world.victims.get(id); if(!v) return null;
+      return { title:'VICTIM — '+id, f:{ Location:fmtGps(v.gps), Priority:v.priority, Status:v.status, 'Assigned team':v.teamId||'—' } }; }
+    if(detail.type==='team'){ const t = world.teams.get(id); if(!t) return null;
+      return { title:'RESCUE TEAM — '+id, f:{ Location:fmtGps(t.gps), Availability:t.availability, 'Assigned victim':t.victimId||'—' } }; }
+    if(detail.type==='shelter'){ const s = world.shelters.get(id); if(!s) return null;
+      return { title:'SHELTER — '+id, f:{ Location:fmtGps(s.gps), Capacity:s.capacity, Occupancy:s.occupancy, Status:pretty(s.status) } }; }
+    if(detail.type==='resource'){ const r = world.resources.get(id); if(!r) return null;
+      return { title:'RESOURCE CACHE — '+id, f:{ Type:r.type, Quantity:r.quantity, Location:fmtGps(r.gps), Status:r.status } }; }
+    return null;
   }
-  document.getElementById('detailClose').addEventListener('click', ()=>gsap.to(drawer,{bottom:-320,duration:0.35,ease:'power3.in'}));
+  function renderDetail(){
+    const d = detailData();
+    if(!d){ if(detail) closeDetail(); return; }
+    detailTitle.textContent = d.title;
+    detailGrid.innerHTML = Object.entries(d.f).map(([k,v])=>`<div class="field"><span>${k.toUpperCase()}</span><b>${v}</b></div>`).join('');
+  }
+  function openDetail(type, id){ detail = { type, id }; renderDetail(); gsap.to(drawer, { bottom:14, duration:0.45, ease:'power3.out' }); }
+  function closeDetail(){ detail = null; gsap.to(drawer, { bottom:-320, duration:0.35, ease:'power3.in' }); }
+  document.getElementById('detailClose').addEventListener('click', closeDetail);
 
+  /* ---------- dispatch log + ticker ---------- */
   const feedList = document.getElementById('feedList');
   const tickerTrack = document.getElementById('tickerTrack');
-  let feedIdx = 1;
-  let tickerMsgs = [];
+  let feedIdx = 1, tickerMsgs = [];
   function refreshTicker(){
-    tickerTrack.innerHTML = (tickerMsgs.slice(0,6).concat(tickerMsgs.slice(0,6))).map(m=>`<span>${m}</span>`).join('');
+    if(!tickerMsgs.length) return;
+    const shown = tickerMsgs.slice(0,6);
+    tickerTrack.innerHTML = shown.concat(shown).map(m=>`<span>${m}</span>`).join('');
   }
-  function logEvent(msg, level){
+  function logEvent(msg, level, t){
     tickerMsgs.unshift(msg.toUpperCase());
     if(tickerMsgs.length>10) tickerMsgs.pop();
     refreshTicker();
     const el = document.createElement('div');
     el.className = 'feed-item '+(level||'info');
-    const time = new Date().toLocaleTimeString();
+    const time = new Date(t || Date.now()).toLocaleTimeString();
     el.innerHTML = `<div class="idx">${String(feedIdx++).padStart(2,'0')}</div><div class="swatch"></div><div class="body"><span class="t">${time}</span>${msg}</div>`;
     feedList.insertBefore(el, feedList.firstChild);
     gsap.from(el, { opacity:0, x:-10, duration:0.35 });
     while(feedList.children.length>24) feedList.removeChild(feedList.lastChild);
   }
-  logEvent('Socket.io channel established — streaming live telemetry.', 'ok');
-  logEvent('4 drones airborne across Sector 07 patrol grid.', 'info');
-  logEvent('Flood zone (Riverside) confirmed — 3 victims detected.', 'crit');
 
-  function dist(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1]); }
-  function tryAssign(){
-    teams.filter(t=>t.availability==='AVAILABLE').forEach(t=>{
-      const candidates = victims.filter(v=>v.status==='UNRESCUED' && !v.claimedBy);
-      if(!candidates.length) return;
-      candidates.sort((a,b)=>dist(t.location,a.location)-dist(t.location,b.location));
-      const target = candidates[0];
-      target.claimedBy = t.id; t.assignedVictim = target; t.availability='DEPLOYED';
-      if(t.line) map.removeLayer(t.line);
-      t.line = L.polyline([[t.location[1],t.location[0]],[target.location[1],target.location[0]]], { color:'#5c7452', weight:3, dashArray:'8,6', opacity:0.9 }).addTo(map);
-      logEvent(`${t.id} dispatched to ${target.id} (${target.priority}) — route plotted.`, 'warn');
-    });
-  }
-  tryAssign();
-
-  let simSeconds=0;
-  function fmtT(s){ return `T+${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
-
-  function tick(){
-    simSeconds++;
-    document.getElementById('simClockPlate').textContent = fmtT(simSeconds);
-
-    drones.forEach(d=>{
-      if(d.status==='PATROL'){
-        d.angle += d.def.speed*0.05;
-        const x = d.def.center[0]+Math.cos(d.angle)*d.def.radius;
-        const y = d.def.center[1]+Math.sin(d.angle)*d.def.radius*0.7;
-        d.marker.setLatLng([y,x]);
-        d.battery -= 0.15;
-        d.sensor = (17+Math.random()*6).toFixed(1)+'°C thermal';
-        if(d.battery<=20 && d.status!=='RTB'){ d.status='RETURNING TO BASE'; logEvent(`${d.id} battery critical (${d.battery.toFixed(0)}%) — returning to base.`,'warn'); }
-      } else if(d.status==='RETURNING TO BASE'){
-        d.battery -= 0.05;
-        if(d.battery<=5){ d.status='CHARGING'; d.battery=5; logEvent(`${d.id} landed at base — charging.`,'info'); }
-      } else if(d.status==='CHARGING'){
-        d.battery += 1.2;
-        if(d.battery>=95){ d.status='PATROL'; logEvent(`${d.id} recharged — resuming patrol.`,'ok'); }
-      }
-    });
-
-    teams.forEach(t=>{
-      if(t.assignedVictim){
-        const target = t.assignedVictim.location;
-        const dx=target[0]-t.location[0], dy=target[1]-t.location[1], d=Math.hypot(dx,dy);
-        if(d>6){
-          t.location[0]+=dx/d*4.5; t.location[1]+=dy/d*4.5;
-          t.marker.setLatLng([t.location[1],t.location[0]]);
-          const angleDeg = Math.atan2(dy,dx)*180/Math.PI+90;
-          const el = t.marker.getElement(); if(el){ const tri = el.querySelector('.team-icon'); if(tri) tri.style.transform=`rotate(${angleDeg}deg)`; }
-          if(t.line) t.line.setLatLngs([[t.location[1],t.location[0]],[target[1],target[0]]]);
-        } else {
-          t.assignedVictim.status='RESCUED'; rescuedCount++;
-          t.assignedVictim.marker.setIcon(victimIcon(t.assignedVictim.priority, true));
-          logEvent(`${t.assignedVictim.id} rescued by ${t.id}. Transporting to nearest shelter.`,'ok');
-          if(t.line){ map.removeLayer(t.line); t.line=null; }
-          t.assignedVictim=null; t.availability='AVAILABLE';
-        }
-      }
-    });
-    tryAssign();
-    updateStats();
-  }
-
+  /* ---------- stat band ---------- */
   function updateStats(){
-    const activeDrones = drones.filter(d=>d.status==='PATROL').length;
-    document.getElementById('statDrones').textContent = `${activeDrones}/${drones.length}`;
-    const unrescued = victims.filter(v=>v.status==='UNRESCUED').length;
-    document.getElementById('statVictims').textContent = unrescued;
-    const deployed = teams.filter(t=>t.availability==='DEPLOYED').length;
-    document.getElementById('statTeams').textContent = `${deployed}/${teams.length}`;
-    const totalCap = shelters.reduce((a,s)=>a+s.capacity,0), totalOcc = shelters.reduce((a,s)=>a+s.occupancy,0);
-    document.getElementById('statShelter').textContent = Math.round(totalOcc/totalCap*100)+'%';
-    document.getElementById('statRescued').textContent = rescuedCount;
+    const drones = [...world.drones.values()], victims = [...world.victims.values()], teams = [...world.teams.values()], shelters = [...world.shelters.values()];
+    document.getElementById('statDrones').textContent  = `${drones.filter(d=>d.status==='PATROL').length}/${drones.length}`;
+    document.getElementById('statVictims').textContent = victims.filter(v=>v.status!=='RESCUED').length;
+    document.getElementById('statTeams').textContent   = `${teams.filter(t=>t.availability==='DEPLOYED').length}/${teams.length}`;
+    const cap = shelters.reduce((a,s)=>a+s.capacity,0), occ = shelters.reduce((a,s)=>a+s.occupancy,0);
+    document.getElementById('statShelter').textContent = (cap ? Math.round(occ/cap*100) : 0) + '%';
+    document.getElementById('statRescued').textContent = world.rescued;
   }
-  updateStats();
-  refreshTicker();
-  setInterval(tick, 900);
 
+  /* ---------- connection status in the header ---------- */
+  const connSeal = document.getElementById('connSeal'), connLabel = document.getElementById('connLabel'), uplink = document.getElementById('uplink');
+  function setConn(state, label, up){
+    connSeal.className = 'seal ' + state;
+    connLabel.textContent = label;
+    if(up !== undefined) uplink.textContent = up;
+  }
+  const overlay = document.getElementById('mapOverlay');
+  const showOverlay = () => { overlay.hidden = false; };
+  const hideOverlay = () => { overlay.hidden = true; };
+
+  /* ---------- LIVE mode: backend + Socket.io ---------- */
+  function goLive(snapshot){
+    if(typeof io === 'undefined') return goOffline('Socket.io client failed to load — running the built-in demo.');
+    applySnapshot(snapshot);
+    setConn('wait', 'CONNECTING…', '—');
+    logEvent('Backend reached — subscribing to live telemetry.', 'ok');
+
+    const socket = io(BACKEND_URL, { transports:['websocket','polling'], reconnectionDelayMax:5000 });
+    let wasDown = false, pingTimer = null;
+    function ping(){
+      const t0 = performance.now();
+      socket.timeout(4000).emit('latency', (err)=>{ if(!err) uplink.textContent = Math.round(performance.now()-t0) + 'ms'; });
+    }
+    socket.on('connect', ()=>{
+      setConn('live', 'SOCKET.IO — LIVE');
+      if(wasDown) logEvent('Connection restored.', 'ok');
+      ping(); clearInterval(pingTimer); pingTimer = setInterval(ping, 4000);
+    });
+    const down = ()=>{
+      setConn('wait', 'RECONNECTING…', '—'); clearInterval(pingTimer);
+      if(!wasDown){ wasDown = true; logEvent('Connection lost — retrying.', 'warn'); }
+    };
+    socket.on('disconnect', down);
+    socket.on('connect_error', down);
+    socket.on('state:init', applySnapshot);
+    ['drone','victim','team','shelter','victim:remove','stats','feed'].forEach(ev => socket.on(ev, p => handleEvent(ev, p)));
+  }
+
+  /* ---------- OFFLINE mode: same engine, running in this tab ---------- */
+  function goOffline(reason){
+    const engine = OutpostEngine.create();
+    applySnapshot(engine.snapshot());
+    setConn('offline', 'OFFLINE DEMO — SIMULATED', '—');
+    logEvent(reason, 'warn');
+    logEvent('Simulation engine is running locally in your browser (no server, no database).', 'info');
+    setInterval(()=>engine.tick(handleEvent), 1000);
+  }
+
+  /* ---------- choose a mode ---------- */
+  function start(){
+    if(FORCE_OFFLINE) return goOffline('Offline mode requested (?offline).');
+    if(warmup.snapshot) return goLive(warmup.snapshot);
+    if(warmup.failed) return goOffline('Backend unreachable — running the built-in demo instead.');
+    // The free-tier server is still waking up: wait for it, but let the user skip.
+    setConn('wait', 'WAKING BACKEND…', '—');
+    showOverlay();
+    let decided = false;
+    document.getElementById('ovSkip').onclick = ()=>{
+      if(decided) return; decided = true; hideOverlay();
+      goOffline('Skipped the wake-up — running the built-in demo.');
+    };
+    warmup.promise.then(s=>{
+      if(decided) return; decided = true; hideOverlay();
+      s ? goLive(s) : goOffline('Backend unreachable — running the built-in demo instead.');
+    });
+  }
+  start();
+
+  /* ---------- clocks ---------- */
+  let simSeconds = 0;
+  const fmtT = (s) => `T+${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  setInterval(()=>{ simSeconds++; document.getElementById('simClockPlate').textContent = fmtT(simSeconds); }, 1000);
   function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
   tickClock(); setInterval(tickClock, 1000);
 

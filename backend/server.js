@@ -5,6 +5,8 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 
+const Engine = require('./sim/engine');
+const { persistAll, persistDrone } = require('./persist');
 const Drone = require('./models/Drone');
 const Victim = require('./models/Victim');
 const RescueTeam = require('./models/RescueTeam');
@@ -12,110 +14,133 @@ const Shelter = require('./models/Shelter');
 const Resource = require('./models/Resource');
 const Zone = require('./models/Zone');
 
+/* ------------------------------ configuration ------------------------------ */
+const PORT = process.env.PORT || 4000;
+const MONGO_URI = process.env.MONGO_URI;
+const INGEST_KEY = process.env.INGEST_KEY; // optional: require x-api-key on hardware posts
+const CORS_ORIGIN = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()) : '*';
+// The map covers a square of MAP_SPAN_DEG degrees around this point. Set it to
+// where your real drone flies so its GPS lands in the middle of the map.
+const MAP_CENTER = {
+  lat: Number(process.env.MAP_CENTER_LAT) || 22.5726,
+  lng: Number(process.env.MAP_CENTER_LNG) || 88.3639,
+};
+const MAP_SPAN_DEG = Number(process.env.MAP_SPAN_DEG) || 0.05;
+
 const app = express();
-app.use(cors());
+app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, { cors: { origin: CORS_ORIGIN } });
 
-const PORT = process.env.PORT || 4000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/aegis_disaster_response';
+const engine = Engine.create({ center: MAP_CENTER, spanDeg: MAP_SPAN_DEG });
+const emit = (type, payload) => io.emit(type, payload);
+const clients = () => io.engine.clientsCount;
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => console.log('[mongo] connected'))
-  .catch((err) => console.error('[mongo] connection error', err));
+/* --------------------------------- MongoDB --------------------------------- */
+const mongoReady = () => mongoose.connection.readyState === 1;
 
-/* --------------------------------------------------------------------
-   REST — CRUD-ish endpoints the React dashboard fetches on load, then
-   keeps in sync afterwards via the Socket.io events emitted below.
-   -------------------------------------------------------------------- */
-app.get('/api/drones', async (req, res) => res.json(await Drone.find()));
-app.get('/api/victims', async (req, res) => res.json(await Victim.find()));
-app.get('/api/teams', async (req, res) => res.json(await RescueTeam.find().populate('assignedVictims')));
-app.get('/api/shelters', async (req, res) => res.json(await Shelter.find()));
-app.get('/api/resources', async (req, res) => res.json(await Resource.find()));
-app.get('/api/zones', async (req, res) => res.json(await Zone.find()));
-
-/* --------------------------------------------------------------------
-   HARDWARE INGEST — this is the route your physical drone talks to.
-
-   Your flight controller / companion board (e.g. an ESP32 or Raspberry
-   Pi Zero riding on the drone) reads GPS (NEO-6M/M8N), battery voltage
-   (a voltage divider into an ADC), and whatever sensors you're carrying
-   (thermal cam, gas sensor, etc.), packages them as JSON, and POSTs (or
-   publishes over MQTT to a bridge that POSTs) here every 1-2 seconds:
-
-   POST /api/ingest/drone
-   {
-     "droneId": "DRN-01",
-     "gps": { "lat": 22.5726, "lng": 88.3639, "altitude": 42, "heading": 187 },
-     "battery": 76,
-     "sensorData": { "thermalReading": 31.2, "gasReading": 410, "signalStrength": -62 }
-   }
-
-   The handler upserts the Drone document and immediately re-broadcasts
-   it to every connected dashboard client over the "drone:update" socket
-   event — that's the "make drone locations update live" requirement.
-   -------------------------------------------------------------------- */
-app.post('/api/ingest/drone', async (req, res) => {
+async function persistNow() {
+  if (!mongoReady()) return;
   try {
-    const { droneId, gps, battery, status, sensorData } = req.body;
-    if (!droneId || !gps) return res.status(400).json({ error: 'droneId and gps are required' });
-
-    const drone = await Drone.findOneAndUpdate(
-      { droneId },
-      { gps, battery, status, sensorData, lastSeen: new Date() },
-      { new: true, upsert: true }
-    );
-
-    io.emit('drone:update', drone);
-
-    // Basic auto-detection hook: if a thermal spike suggests a person,
-    // you could auto-create a Victim here instead of waiting for a human.
-    if (sensorData && sensorData.thermalReading > 36) {
-      io.emit('drone:alert', { droneId, message: 'Possible heat signature detected', gps });
-    }
-
-    res.json(drone);
+    await persistAll(engine.snapshot(), engine.toGps);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'ingest failed' });
+    console.error('[mongo] persist failed:', err.message);
   }
+}
+
+if (MONGO_URI) {
+  mongoose
+    .connect(MONGO_URI, { serverSelectionTimeoutMS: 8000 })
+    .then(() => {
+      console.log('[mongo] connected');
+      return persistNow();
+    })
+    .catch((err) => console.error('[mongo] connection failed — running in memory only:', err.message));
+} else {
+  console.warn('[mongo] MONGO_URI not set — running in memory only');
+}
+
+/* ------------------------------ live simulation ------------------------------ */
+// The world only advances while someone is watching, so an idle free-tier
+// instance does no work and makes no database writes.
+setInterval(() => {
+  if (clients() > 0) engine.tick(emit);
+}, 1000);
+setInterval(() => {
+  if (clients() > 0) persistNow();
+}, 5000);
+
+/* ------------------------------------ REST ----------------------------------- */
+app.get('/', (req, res) =>
+  res.json({ name: 'OUTPOST backend', status: 'ok', try: ['/api/health', '/api/state', '/api/drones'] })
+);
+
+app.get('/api/health', (req, res) =>
+  res.json({
+    ok: true,
+    mongo: mongoReady() ? 'connected' : 'not connected',
+    clients: clients(),
+    tick: engine.state.tick,
+    map: { center: MAP_CENTER, spanDeg: MAP_SPAN_DEG },
+  })
+);
+
+// Full live snapshot — the frontend loads this first (it also wakes a sleeping free-tier server).
+app.get('/api/state', (req, res) => res.json(engine.snapshot()));
+
+const list = (Model) => async (req, res) => {
+  if (!mongoReady()) return res.status(503).json({ error: 'database not connected' });
+  res.json(await Model.find().lean());
+};
+app.get('/api/drones', list(Drone));
+app.get('/api/victims', list(Victim));
+app.get('/api/teams', list(RescueTeam));
+app.get('/api/shelters', list(Shelter));
+app.get('/api/resources', list(Resource));
+app.get('/api/zones', list(Zone));
+
+/* ------------------------------ hardware ingest ------------------------------ */
+// Your physical drone (ESP32 / Pi) posts telemetry here every second or two:
+// {
+//   "droneId": "DRN-HW1",
+//   "gps": { "lat": 22.5726, "lng": 88.3639, "altitude": 42, "heading": 187 },
+//   "battery": 76,
+//   "status": "PATROL",
+//   "sensorData": { "thermalReading": 31.2, "gasReading": 410, "signalStrength": -62 }
+// }
+// It appears on every open dashboard immediately, marked as a live hardware link.
+app.post('/api/ingest/drone', (req, res) => {
+  if (INGEST_KEY && req.get('x-api-key') !== INGEST_KEY) return res.status(401).json({ error: 'bad or missing x-api-key' });
+  const b = req.body || {};
+  const lat = Number(b.gps && b.gps.lat);
+  const lng = Number(b.gps && b.gps.lng);
+  if (!b.droneId || typeof b.droneId !== 'string' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({ error: 'droneId (string) and gps.lat / gps.lng (numbers) are required' });
+  }
+  const wire = engine.ingestDrone(b, emit);
+  if (mongoReady()) persistDrone(wire).catch((err) => console.error('[mongo] drone persist failed:', err.message));
+  res.json(wire);
 });
 
-/* --------------------------------------------------------------------
-   Dispatcher actions — a human (or an assignment algorithm) calling
-   these also broadcasts over sockets so every open dashboard updates
-   instantly, no polling.
-   -------------------------------------------------------------------- */
-app.post('/api/victims', async (req, res) => {
-  const victim = await Victim.create(req.body);
-  io.emit('victim:new', victim);
-  res.status(201).json(victim);
+// Log a victim from outside: { "lat": .., "lng": .., "priority": "CRITICAL" }  (or x / y in map space)
+app.post('/api/victims', (req, res) => {
+  const b = req.body || {};
+  const hasGps = Number.isFinite(Number(b.lat)) && Number.isFinite(Number(b.lng));
+  const hasXY = Number.isFinite(Number(b.x)) && Number.isFinite(Number(b.y));
+  if (!hasGps && !hasXY) return res.status(400).json({ error: 'send lat + lng, or x + y' });
+  res.status(201).json(engine.addVictim(b, emit));
 });
 
-app.post('/api/teams/:teamId/assign', async (req, res) => {
-  const { teamId } = req.params;
-  const { victimId } = req.body;
-  const team = await RescueTeam.findOneAndUpdate(
-    { teamId },
-    { availability: 'DEPLOYED', $addToSet: { assignedVictims: victimId } },
-    { new: true }
-  );
-  const victim = await Victim.findByIdAndUpdate(victimId, { status: 'ASSIGNED', assignedTeam: team._id }, { new: true });
-  io.emit('team:update', team);
-  io.emit('victim:update', victim);
-  res.json({ team, victim });
-});
-
-/* --------------------------------------------------------------------
-   Socket.io connection lifecycle
-   -------------------------------------------------------------------- */
+/* ---------------------------------- sockets ---------------------------------- */
 io.on('connection', (socket) => {
-  console.log('[socket] client connected', socket.id);
-  socket.on('disconnect', () => console.log('[socket] client disconnected', socket.id));
+  console.log('[socket] connected', socket.id, `(${clients()} open)`);
+  socket.emit('state:init', engine.snapshot());
+  socket.on('latency', (cb) => typeof cb === 'function' && cb());
+  socket.on('disconnect', () => console.log('[socket] disconnected', socket.id));
 });
 
-server.listen(PORT, () => console.log(`AEGIS backend listening on :${PORT}`));
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+
+server.listen(PORT, () => console.log(`OUTPOST backend listening on :${PORT}`));

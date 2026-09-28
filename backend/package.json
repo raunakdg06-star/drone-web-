@@ -1,12 +1,15 @@
 {
-  "name": "aegis-disaster-response-backend",
-  "version": "1.0.0",
-  "description": "Express + Socket.io + MongoDB backend for the AEGIS Disaster Response Command Center",
+  "name": "outpost-disaster-response-backend",
+  "version": "2.0.0",
+  "description": "Express + Socket.io + MongoDB backend for the OUTPOST Disaster Response Command Center",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "seed": "node simulators/seed.js"
+    "fake-drone": "node simulators/fake-hardware.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "cors": "^2.8.5",
