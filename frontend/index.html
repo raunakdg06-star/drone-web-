@@ -5,7 +5,7 @@
 <title>OUTPOST // Disaster Response Command</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Expanded:wght@600;700&family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Allerta+Stencil&family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
@@ -13,242 +13,227 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <style>
 :root{
-  --ink:#0e0c09;
-  --paper:#f2ead9;
-  --paper-dim:#c9bfa8;
-  --panel:#161310;
-  --line:#3a332a;
-  --line-strong:#5c5240;
-  --gold:#d6923e;
-  --gold-deep:#9c6420;
-  --alta:#a8342b;
-  --moss:#5c7452;
-  --brass:#8a7455;
-  --font-poster:'Anton', sans-serif;
-  --font-head:'Archivo Expanded', sans-serif;
+  --paper:#f1e9d6; --paper-2:#e8dec2; --paper-3:#dfd2ae;
+  --ink:#201a10; --ink-dim:#5b5240; --ink-faint:#8a8068;
+  --line:rgba(32,26,16,0.18); --line-strong:rgba(32,26,16,0.4);
+  --alert:#c2401c; --alert-dim:#8f3015;
+  --moss:#4f6b3a; --water:#4f7589; --ochre:#9c7a1f;
+  --cut:4px 4px 0 var(--ink);
+  --cut-sm:3px 3px 0 var(--ink);
+  --font-stencil:'Allerta Stencil', sans-serif;
+  --font-mono:'Space Mono', monospace;
   --font-cond:'Barlow Condensed', sans-serif;
   --font-body:'Inter', sans-serif;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
-html,body{ width:100%; height:100%; overflow:hidden; background:var(--ink); color:var(--paper); font-family:var(--font-body); }
+html,body{ width:100%; height:100%; overflow:hidden; color:var(--ink); font-family:var(--font-body); background:var(--paper); }
 @media (prefers-reduced-motion: reduce){ *{ animation-duration:0.001s !important; transition-duration:0.001s !important; } }
 
-/* film-grain texture, used everywhere */
-.grain{ position:fixed; inset:0; pointer-events:none; z-index:900; opacity:0.05; mix-blend-mode:overlay; }
+/* paper grain -- multiply, not overlay, so it darkens the cream rather than glowing on black */
+.grain{ position:fixed; inset:0; pointer-events:none; z-index:900; opacity:0.05; mix-blend-mode:multiply; }
 
-/* ---------------- CUSTOM CURSOR: the drone ---------------- */
+/* ---------------- CUSTOM CURSOR: flat ink drone, no gradients ---------------- */
 html.has-custom-cursor, html.has-custom-cursor *{ cursor:none !important; }
 #customCursor{ position:fixed; top:0; left:0; width:30px; height:30px; pointer-events:none; z-index:2000; opacity:0; }
 #customCursor svg{ width:100%; height:100%; overflow:visible; }
-.hd-body{ fill:var(--gold); stroke:var(--ink); stroke-width:5; }
+.hd-body{ fill:var(--paper); stroke:var(--ink); stroke-width:5; }
 .hd-arm{ stroke:var(--ink); stroke-width:5; stroke-linecap:round; }
 .hd-rotor{ fill:var(--paper); stroke:var(--ink); stroke-width:4; }
-.hd-blade{ stroke:var(--ink); stroke-width:2.5; stroke-linecap:round; transform-origin:center; animation:hdSpin 0.35s linear infinite; }
-.hd-eye{ fill:var(--ink); }
-@keyframes hdSpin{ from{ transform:rotate(0);} to{ transform:rotate(360deg);} }
+.hd-blade{ stroke:var(--ink); stroke-width:2.5; stroke-linecap:round; transform-origin:center; }
+.hd-eye{ fill:var(--alert); }
 
 /* ---------------- HERO DRONE: opening entrance graphic ---------------- */
-#heroDrone{
-  position:fixed; width:300px; height:300px; left:50%; top:50%;
-  z-index:250; pointer-events:none; transform-origin:center center;
-}
+#heroDrone{ position:fixed; width:300px; height:300px; left:50%; top:50%; z-index:250; pointer-events:none; transform-origin:center center; }
 #heroDrone svg{ width:100%; height:100%; overflow:visible; }
-#heroDrone.settled{ animation:hdIdle 3.4s ease-in-out infinite alternate; }
-@keyframes hdIdle{ from{ transform:rotate(-3deg);} to{ transform:rotate(3deg);} }
-.markSlot{ width:34px; height:34px; flex-shrink:0; position:relative; }
+.markSlot{ width:38px; height:38px; flex-shrink:0; position:relative; border:2px solid var(--ink); background:var(--paper); }
 
-/* ---------------- MARQUEE (signature element) ---------------- */
+/* ---------------- MARQUEE: inverted ink band, perforated-edge feel ---------------- */
 .ticker{
-  overflow:hidden; white-space:nowrap; background:var(--gold); color:var(--ink);
-  border-bottom:2px solid var(--ink); position:relative; z-index:30;
+  overflow:hidden; white-space:nowrap; background:var(--ink); color:var(--paper);
+  border-top:2px dashed var(--ink-faint); border-bottom:2px dashed var(--ink-faint); position:relative; z-index:30;
 }
 .ticker .track{
   display:inline-block; padding-left:100%;
-  font-family:var(--font-cond); font-weight:700; letter-spacing:1.5px; font-size:13px;
+  font-family:var(--font-mono); font-weight:700; letter-spacing:1px; font-size:12px;
   text-transform:uppercase; animation:tickerScroll 22s linear infinite;
 }
 .ticker .track span{ margin:0 22px; }
 @keyframes tickerScroll{ from{ transform:translateX(0);} to{ transform:translateX(-100%);} }
 
-/* ---------------- INTRO ---------------- */
-#intro{ position:fixed; inset:0; z-index:200; background:#080604; }
-#intro canvas{ display:block; width:100%; height:100%; filter:sepia(0.25) contrast(1.05); }
+/* ---------------- INTRO: technical drafting board, same paper world as the dashboard ---------------- */
+#intro{ position:fixed; inset:0; z-index:200; background:var(--paper); }
+#intro canvas{ display:block; width:100%; height:100%; opacity:0; transition:opacity 1.4s ease; }
+#intro canvas.show{ opacity:1; }
 #introHud{ position:absolute; inset:0; pointer-events:none; font-family:var(--font-cond); }
 .plate{
-  position:absolute; border:2px solid var(--paper); background:rgba(8,6,4,0.55);
-  padding:8px 12px; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600;
+  position:absolute; border:2px solid var(--ink); background:var(--paper);
+  padding:8px 12px; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; color:var(--ink);
 }
-#introHud .tl{ top:26px; left:26px; }
-#introHud .tr{ top:26px; right:26px; text-align:right; }
-#introHud .bl{ bottom:56px; left:26px; display:flex; gap:0; }
-#introHud .bl div{ border-right:1px solid var(--line-strong); padding:6px 16px; }
+#introHud .tl{ top:26px; left:26px; } #introHud .tr{ top:26px; right:26px; text-align:right; }
+#introHud .bl{ position:absolute; bottom:56px; left:26px; display:flex; gap:0; border:2px solid var(--ink); background:var(--paper); opacity:0; }
+#introHud .bl div{ border-right:1px solid var(--line-strong); padding:8px 18px; min-width:92px; }
 #introHud .bl div:last-child{ border-right:none; }
-#introHud .bl span{ display:block; font-size:9px; color:var(--paper-dim); letter-spacing:2px; }
-#introHud .bl b{ font-family:var(--font-poster); font-size:20px; font-weight:400; letter-spacing:1px; }
+#introHud .bl span{ display:block; font-size:9px; color:var(--ink-dim); letter-spacing:2px; }
+#introHud .bl b{ font-family:var(--font-mono); font-size:18px; font-weight:700; letter-spacing:1px; }
 #introHud .br{ bottom:56px; right:26px; text-align:right; }
-#introHud .stamp{
-  position:absolute; top:50%; left:50%; transform:translate(-50%,-60%); text-align:center;
-}
-#introHud .stamp h1{
-  font-family:var(--font-poster); font-weight:400; font-size:clamp(48px,9vw,120px);
-  letter-spacing:4px; color:var(--paper); opacity:0; line-height:0.9;
-}
-#introHud .stamp .rule{
-  height:6px; background:var(--gold); width:0%; margin:14px auto 0;
-}
-#introHud .stamp .sub{
-  font-family:var(--font-cond); font-weight:600; letter-spacing:6px; font-size:13px;
-  color:var(--gold); text-transform:uppercase; margin-top:16px; opacity:0;
-}
+#introHud .stamp{ position:absolute; top:50%; left:50%; transform:translate(-50%,-60%); text-align:center; }
+#introHud .stamp h1{ font-family:var(--font-stencil); font-weight:400; font-size:clamp(48px,9vw,120px); letter-spacing:6px; color:var(--ink); opacity:0; line-height:0.9; }
+#introHud .stamp .rule{ height:4px; background:var(--alert); width:0%; margin:16px auto 0; }
+#introHud .stamp .sub{ font-family:var(--font-mono); font-weight:700; letter-spacing:5px; font-size:12px; color:var(--ink-dim); text-transform:uppercase; margin-top:16px; opacity:0; }
 #skipBtn{
   position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
-  pointer-events:auto; cursor:pointer; background:var(--paper); color:var(--ink);
-  border:2px solid var(--paper); font-family:var(--font-cond); font-weight:700; font-size:13px;
+  pointer-events:auto; cursor:pointer; background:var(--ink); color:var(--paper);
+  border:2px solid var(--ink); font-family:var(--font-cond); font-weight:700; font-size:13px;
   letter-spacing:2px; text-transform:uppercase; padding:11px 26px; opacity:0; transition:background .15s,color .15s;
 }
-#skipBtn:hover{ background:transparent; color:var(--paper); }
+#skipBtn:hover{ background:var(--paper); color:var(--ink); }
 
 /* ---------------- DASHBOARD ---------------- */
-#dashboard{ position:fixed; inset:0; opacity:0; pointer-events:none; display:grid; grid-template-rows:32px 78px auto 1fr; background:var(--ink); }
+#dashboard{ position:fixed; inset:0; opacity:0; pointer-events:none; display:grid; grid-template-rows:30px 76px auto 1fr; background:var(--paper); }
 #dashboard.live{ pointer-events:auto; }
 
 header{
   grid-column:1/-1; display:flex; align-items:center; justify-content:space-between;
-  padding:0 24px; border-bottom:2px solid var(--paper); background:var(--ink);
+  padding:0 26px; position:relative; z-index:5; background:var(--paper);
+  border-bottom:3px solid var(--ink);
 }
-header .brand{ display:flex; align-items:baseline; gap:14px; }
-header .brand h1{ font-family:var(--font-poster); font-weight:400; font-size:26px; letter-spacing:1px; color:var(--paper); }
-header .brand .sub{ font-family:var(--font-cond); font-size:11px; letter-spacing:2px; color:var(--paper-dim); text-transform:uppercase; }
-header .status{ display:flex; align-items:center; gap:24px; font-family:var(--font-cond); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:12px; }
-header .status .seal{ --seal:var(--brass); width:11px; height:11px; border:2px solid var(--seal); border-radius:50%; position:relative; }
-header .status .seal::after{ content:''; position:absolute; inset:2px; background:var(--seal); border-radius:50%; }
-header .status .seal.live{ --seal:var(--moss); }
-header .status .seal.wait{ --seal:var(--gold); }
-header .status .seal.live::after, header .status .seal.wait::after{ animation:blink 1.8s infinite; }
-header .status .item span{ color:var(--paper); }
-header .status .item #uplink{ min-width:42px; display:inline-block; }
-@keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.15;} }
-header .status .item{ display:flex; align-items:center; gap:8px; color:var(--paper-dim); }
-header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; color:var(--paper); letter-spacing:1px; }
+header::after{ content:''; position:absolute; left:0; right:0; bottom:-6px; height:1px; background:var(--ink-faint); }
+header .brand{ display:flex; align-items:center; gap:16px; }
+header .brand h1{ font-family:var(--font-stencil); font-weight:400; font-size:25px; letter-spacing:2px; color:var(--ink); }
+header .brand .sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:1px; color:var(--ink-dim); text-transform:uppercase; }
+header .status{ display:flex; align-items:center; gap:24px; font-family:var(--font-mono); font-weight:700; letter-spacing:0.5px; text-transform:uppercase; font-size:11px; }
+header .status .seal{ --seal:var(--ink-faint); width:10px; height:10px; border-radius:50%; background:var(--seal); border:2px solid var(--ink); position:relative; }
+header .status .seal.live{ --seal:var(--moss); } header .status .seal.wait{ --seal:var(--alert); }
+header .status .seal.live, header .status .seal.wait{ animation:blink 1.8s infinite; }
+@keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+header .status .item{ display:flex; align-items:center; gap:8px; color:var(--ink-dim); }
+header .status .item span{ color:var(--ink); } header .status .item #uplink{ min-width:42px; display:inline-block; }
+header .clock{ font-family:var(--font-mono); font-weight:700; font-size:16px; color:var(--ink); letter-spacing:1px;
+  background:var(--paper-2); padding:6px 14px; border:2px solid var(--ink); }
 
-#statBand{
-  grid-column:1/-1; display:flex; border-bottom:2px solid var(--paper); background:var(--panel);
-}
-.stat{ flex:1; padding:10px 22px; border-right:1px solid var(--line-strong); }
+#statBand{ grid-column:1/-1; display:flex; border-top:1px solid var(--ink-faint); border-bottom:3px solid var(--ink); background:var(--paper-2); }
+.stat{ flex:1; display:flex; align-items:center; gap:14px; padding:12px 20px; border-right:1px solid var(--line-strong); transition:background .15s ease; }
 .stat:last-child{ border-right:none; }
-.stat .num{ font-family:var(--font-poster); font-weight:400; font-size:34px; line-height:1; color:var(--paper); }
-.stat .num.alta{ color:var(--alta); } .stat .num.gold{ color:var(--gold); } .stat .num.moss{ color:var(--moss); }
-.stat .cap{ font-family:var(--font-cond); font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--paper-dim); margin-top:2px; }
+.stat:hover{ background:var(--paper-3); }
+.stat .chip{ width:30px; height:30px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+.stat .chip svg{ width:22px; height:22px; }
+.stat .num{ font-family:var(--font-mono); font-weight:700; font-size:28px; line-height:1; color:var(--ink); letter-spacing:-0.5px; }
+.stat .num.alta{ color:var(--alert); } .stat .num.gold{ color:var(--ink); } .stat .num.moss{ color:var(--moss); }
+.stat .cap{ font-family:var(--font-cond); font-size:10.5px; letter-spacing:1.6px; text-transform:uppercase; color:var(--ink-dim); margin-top:2px; }
 
-#body{ display:grid; grid-template-columns:280px 1fr 320px; min-height:0; }
-.panel-scroll{ overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--line-strong) transparent; }
-.panel-scroll::-webkit-scrollbar{ width:5px; } .panel-scroll::-webkit-scrollbar-thumb{ background:var(--line-strong); }
+#body{ display:grid; grid-template-columns:270px 1fr 310px; min-height:0; }
+.panel-scroll{ overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--ink-faint) transparent; }
+.panel-scroll::-webkit-scrollbar{ width:5px; } .panel-scroll::-webkit-scrollbar-thumb{ background:var(--ink-faint); }
 
-#sidebarLeft{ border-right:2px solid var(--paper); padding:18px 18px; display:flex; flex-direction:column; gap:22px; }
-.hd{ font-family:var(--font-head); font-weight:700; font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--gold); border-bottom:2px solid var(--line-strong); padding-bottom:8px; margin-bottom:10px; }
-.numlist{ display:flex; flex-direction:column; gap:9px; }
-.numlist .row{ display:flex; align-items:center; gap:10px; font-family:var(--font-cond); font-size:13px; }
-.numlist .row .idx{ font-family:var(--font-poster); font-weight:400; font-size:15px; color:var(--brass); width:20px; }
-.numlist .row .swatch{ width:11px; height:11px; border:1.5px solid var(--paper); flex-shrink:0; }
-.numlist .row .swatch.circle{ border-radius:50%; }
+#sidebarLeft{ position:relative; z-index:3; padding:18px 16px; display:flex; flex-direction:column; gap:16px; border-right:3px solid var(--ink); }
+.section-card{ background:var(--paper-2); border:2px solid var(--ink); padding:14px 15px 12px; box-shadow:var(--cut-sm); }
+.hd{ font-family:var(--font-cond); font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--ink);
+  padding-bottom:8px; margin-bottom:10px; border-bottom:2px solid var(--ink); display:flex; align-items:center; gap:8px; }
+.hd::before{ content:''; width:7px; height:7px; background:var(--alert); }
+.numlist{ display:flex; flex-direction:column; gap:1px; }
+.numlist .row{ display:flex; align-items:center; gap:10px; font-family:var(--font-cond); font-size:13.5px; padding:5px 4px; }
+.numlist .row .badge{ width:13px; height:13px; flex-shrink:0; border:2px solid var(--ink); background:transparent; }
+.numlist .row .badge.circle{ border-radius:50%; }
+.numlist .row .badge.fill{ background:var(--ink); }
+.numlist .row .badge.alert{ background:var(--alert); border-color:var(--alert); }
 
-.zonerow{ display:flex; justify-content:space-between; align-items:baseline; font-family:var(--font-cond); font-size:13px; padding:6px 0; border-bottom:1px solid var(--line); }
-.zonerow b{ font-family:var(--font-head); font-size:11px; letter-spacing:1px; }
+.zonerow{ display:flex; justify-content:space-between; align-items:baseline; font-family:var(--font-mono); font-size:12.5px; padding:7px 2px; border-bottom:1px solid var(--line-strong); }
+.zonerow:last-child{ border-bottom:none; }
+.zonerow b{ font-family:var(--font-cond); font-weight:700; font-size:11px; letter-spacing:1px; }
 
-#mapWrap{ position:relative; min-width:0; min-height:0; border-right:2px solid var(--paper); }
-#map{ position:absolute; inset:14px; background:#0c0a08; border:2px solid var(--paper); }
-.leaflet-container{ background:#0c0a08; }
-.corner-tick{ position:absolute; width:16px; height:16px; border-color:var(--gold); z-index:440; pointer-events:none; }
-.corner-tick.tl{ top:8px; left:8px; border-top:3px solid var(--gold); border-left:3px solid var(--gold); }
-.corner-tick.tr{ top:8px; right:8px; border-top:3px solid var(--gold); border-right:3px solid var(--gold); }
-.corner-tick.bl{ bottom:8px; left:8px; border-bottom:3px solid var(--gold); border-left:3px solid var(--gold); }
-.corner-tick.br{ bottom:8px; right:8px; border-bottom:3px solid var(--gold); border-right:3px solid var(--gold); }
+#mapWrap{ position:relative; min-width:0; min-height:0; padding:14px; }
+#map{ position:absolute; inset:14px; background:var(--paper-3); border:3px solid var(--ink); }
+.leaflet-pane, .leaflet-top, .leaflet-bottom{ z-index:2; }
+.leaflet-container{ background:var(--paper-3); }
+.corner-tick{ position:absolute; width:18px; height:18px; z-index:440; pointer-events:none; }
+.corner-tick.tl{ top:22px; left:22px; border-top:3px solid var(--ink); border-left:3px solid var(--ink); }
+.corner-tick.tr{ top:22px; right:22px; border-top:3px solid var(--ink); border-right:3px solid var(--ink); }
+.corner-tick.bl{ bottom:22px; left:22px; border-bottom:3px solid var(--ink); border-left:3px solid var(--ink); }
+.corner-tick.br{ bottom:22px; right:22px; border-bottom:3px solid var(--ink); border-right:3px solid var(--ink); }
 
-#mapCaption{
-  position:absolute; top:22px; left:22px; z-index:450; background:var(--ink); border:2px solid var(--paper);
-  padding:6px 12px; font-family:var(--font-cond); font-weight:600; font-size:11px; letter-spacing:1.5px; text-transform:uppercase;
-}
-#mapCaption b{ color:var(--gold); }
-#simClockPlate{
-  position:absolute; top:22px; right:22px; z-index:450; background:var(--gold); color:var(--ink); border:2px solid var(--ink);
-  padding:6px 12px; font-family:var(--font-poster); font-weight:400; font-size:13px; letter-spacing:1px;
-}
+#mapCaption{ position:absolute; top:36px; left:36px; z-index:450; background:var(--paper); border:2px solid var(--ink);
+  padding:6px 13px; font-family:var(--font-mono); font-weight:700; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+#mapCaption b{ color:var(--alert); }
+#simClockPlate{ position:absolute; top:36px; right:36px; z-index:450; background:var(--ink); color:var(--paper);
+  padding:6px 13px; border:2px solid var(--ink); font-family:var(--font-mono); font-weight:700; font-size:13px; letter-spacing:1px; }
 
-/* flat markers -- no glow, no blur */
-.drone-icon{ width:22px; height:22px; position:relative; }
-.drone-icon .reticle{ position:absolute; inset:0; border:2px solid var(--gold); }
-.drone-icon .reticle::before, .drone-icon .reticle::after{ content:''; position:absolute; background:var(--gold); }
-.drone-icon .dot{ position:absolute; inset:8px; background:var(--gold); }
-.drone-icon .spin{ position:absolute; inset:-4px; border-top:2px solid var(--gold); border-radius:50%; animation:spin 1.4s linear infinite; }
-@keyframes spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
-.drone-icon .idlabel{ position:absolute; top:24px; left:50%; transform:translateX(-50%); white-space:nowrap;
-  font-family:var(--font-cond); font-weight:700; font-size:10px; letter-spacing:1px; color:var(--gold); background:var(--ink); padding:1px 4px; border:1px solid var(--gold); }
+/* ---------------- markers: flat ink glyphs, stamped rather than lit ---------------- */
+.drone-icon{ width:26px; height:26px; position:relative; }
+.drone-icon .battery-ring{ position:absolute; inset:-5px; border-radius:50%; padding:2.5px;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; }
+.drone-icon .body{ position:absolute; inset:3px; border-radius:50%; background:var(--paper); border:2.5px solid var(--ink); }
+.drone-icon .body::before, .drone-icon .body::after{ content:''; position:absolute; background:var(--ink); }
+.drone-icon .body::before{ left:50%; top:18%; bottom:18%; width:2px; transform:translateX(-50%); }
+.drone-icon .body::after{ top:50%; left:18%; right:18%; height:2px; transform:translateY(-50%); }
+.drone-icon .idlabel{ position:absolute; top:28px; left:50%; transform:translateX(-50%); white-space:nowrap;
+  font-family:var(--font-mono); font-weight:700; font-size:10px; letter-spacing:0.5px; color:var(--paper); background:var(--ink);
+  padding:2px 6px; }
+.drone-icon.hw .body{ background:var(--alert); border-color:var(--ink); }
+.drone-icon.hw .body::before, .drone-icon.hw .body::after{ background:var(--paper); }
+.drone-icon.idle{ opacity:.45; }
 
-.victim-icon{ width:16px; height:16px; border:2px solid var(--paper); }
-.victim-icon.critical{ background:var(--alta); }
-.victim-icon.high{ background:#c9622f; }
-.victim-icon.moderate{ background:var(--gold); }
-.victim-icon.rescued{ background:var(--moss); }
+.victim-icon{ width:16px; height:16px; border-radius:50%; position:relative; border:2.5px solid var(--ink); background:var(--paper); }
+.victim-icon::after{ content:''; position:absolute; inset:-6px; border-radius:50%; border:1.5px solid var(--alert); opacity:0; }
+.victim-icon.critical{ background:var(--alert); border-color:var(--ink); }
+.victim-icon.critical::after{ animation:vpulse 1.5s ease-out infinite; }
+.victim-icon.high{ background:var(--paper); border-color:var(--alert); border-width:3px; }
+.victim-icon.moderate{ background:var(--paper); border-color:var(--ink); }
+.victim-icon.low{ background:var(--paper); border-color:var(--ink-faint); }
+.victim-icon.rescued{ background:var(--moss); border-color:var(--ink); }
+@keyframes vpulse{ 0%{ transform:scale(.7); opacity:.6; } 100%{ transform:scale(2); opacity:0; } }
 
-.team-icon{ width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-bottom:14px solid var(--moss);
-  filter:drop-shadow(1px 1px 0 var(--ink)); transition:transform .3s linear; }
+.team-icon{ width:20px; height:20px; position:relative; transition:transform .3s linear; }
+.team-icon::before{ content:''; position:absolute; inset:0; clip-path:polygon(50% 2%, 95% 92%, 50% 72%, 5% 92%);
+  background:var(--paper); border:2px solid var(--ink); }
 
-.shelter-icon{ width:22px; height:22px; background:var(--gold); border:2px solid var(--ink); display:flex; align-items:center; justify-content:center;
-  font-family:var(--font-poster); color:var(--ink); font-size:12px; }
-.resource-icon{ width:16px; height:16px; background:var(--ink); border:2px solid var(--gold); transform:rotate(45deg); }
+.shelter-icon{ width:24px; height:24px; display:flex; align-items:center; justify-content:center; position:relative;
+  background:var(--paper); border:2.5px solid var(--ink); font-family:var(--font-mono); color:var(--ink); font-size:12px; font-weight:700; }
+.resource-icon{ width:17px; height:17px; background:var(--paper); transform:rotate(45deg); border:2px solid var(--ink); position:relative; }
+.resource-icon::after{ content:''; position:absolute; inset:34%; background:var(--ink); }
 
-.leaflet-tooltip.field-tip{ background:var(--ink); border:2px solid var(--paper); color:var(--paper); border-radius:0;
-  font-family:var(--font-cond); font-weight:600; font-size:11px; letter-spacing:1px; text-transform:uppercase; padding:4px 8px; }
+.leaflet-tooltip.field-tip{ background:var(--ink); border:none; color:var(--paper); border-radius:0;
+  font-family:var(--font-mono); font-weight:700; font-size:11px; letter-spacing:0.5px; text-transform:uppercase; padding:4px 8px; }
 
-#sidebarRight{ padding:18px 18px; display:flex; flex-direction:column; min-height:0; }
-#feedList{ flex:1; min-height:0; display:flex; flex-direction:column; gap:0; margin-top:4px; }
-.feed-item{ display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
-.feed-item .idx{ font-family:var(--font-poster); font-weight:400; font-size:18px; color:var(--brass); width:26px; flex-shrink:0; }
-.feed-item .body{ font-family:var(--font-body); font-size:12.5px; line-height:1.5; }
-.feed-item .body .t{ display:block; font-family:var(--font-cond); font-size:10px; letter-spacing:1.5px; color:var(--paper-dim); text-transform:uppercase; margin-bottom:2px; }
+#sidebarRight{ position:relative; z-index:3; padding:18px 16px; display:flex; flex-direction:column; min-height:0; border-left:3px solid var(--ink); }
+#feedList{ flex:1; min-height:0; display:flex; flex-direction:column; gap:0; margin-top:4px; overflow-y:auto; padding-right:2px; }
+.feed-item{ display:flex; gap:10px; padding:9px 2px; align-items:flex-start; border-bottom:1px solid var(--line-strong); }
+.feed-item .idx{ font-family:var(--font-mono); font-weight:700; font-size:14px; color:var(--ink-faint); width:18px; flex-shrink:0; }
+.feed-item .body{ font-family:var(--font-body); font-size:12.5px; line-height:1.5; color:var(--ink); }
+.feed-item .body .t{ display:block; font-family:var(--font-mono); font-size:10px; letter-spacing:0.5px; color:var(--ink-dim); text-transform:uppercase; margin-bottom:2px; }
 .feed-item .swatch{ width:8px; height:8px; margin-top:5px; flex-shrink:0; }
-.feed-item.crit .swatch{ background:var(--alta); } .feed-item.warn .swatch{ background:var(--gold); }
-.feed-item.ok .swatch{ background:var(--moss); } .feed-item.info .swatch{ background:var(--brass); }
+.feed-item.crit .swatch{ background:var(--alert); } .feed-item.crit .idx{ color:var(--alert); }
+.feed-item.warn .swatch{ background:var(--ochre); } .feed-item.ok .swatch{ background:var(--moss); } .feed-item.info .swatch{ background:var(--ink-faint); }
 
-/* detail drawer */
-#detailDrawer{
-  position:absolute; left:14px; right:14px; bottom:-320px; z-index:500;
-  background:var(--ink); border:2px solid var(--paper); padding:18px 22px;
-}
-#detailDrawer .head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:2px solid var(--line-strong); padding-bottom:10px; }
-#detailDrawer .head h3{ font-family:var(--font-poster); font-weight:400; font-size:20px; letter-spacing:1px; color:var(--gold); }
-#detailDrawer .close{ cursor:pointer; font-family:var(--font-cond); font-weight:700; font-size:12px; letter-spacing:1.5px; border:2px solid var(--paper); padding:6px 14px; text-transform:uppercase; }
-#detailDrawer .close:hover{ background:var(--paper); color:var(--ink); }
-#detailGrid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:16px; }
-#detailGrid .field span{ display:block; font-family:var(--font-cond); font-size:10px; letter-spacing:1.5px; color:var(--paper-dim); text-transform:uppercase; margin-bottom:4px; }
-#detailGrid .field b{ font-family:var(--font-poster); font-weight:400; font-size:18px; color:var(--paper); }
+/* detail drawer: an index card popped up off the stack */
+#detailDrawer{ position:absolute; left:28px; right:28px; bottom:-320px; z-index:500; background:var(--paper); padding:18px 24px;
+  border:3px solid var(--ink); box-shadow:var(--cut); }
+#detailDrawer .head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:2px solid var(--ink); padding-bottom:12px; }
+#detailDrawer .head h3{ font-family:var(--font-cond); font-weight:700; font-size:19px; letter-spacing:1px; color:var(--ink); text-transform:uppercase; }
+#detailDrawer .close{ cursor:pointer; font-family:var(--font-mono); font-weight:700; font-size:12px; letter-spacing:1px; border:2px solid var(--ink); padding:6px 14px; text-transform:uppercase; background:var(--paper); transition:background .15s,color .15s; }
+#detailDrawer .close:hover{ background:var(--ink); color:var(--paper); }
+#detailGrid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:0; }
+#detailGrid .field{ border-left:1px solid var(--line-strong); padding:2px 14px; }
+#detailGrid .field:first-child{ border-left:none; padding-left:0; }
+#detailGrid .field span{ display:block; font-family:var(--font-mono); font-size:10px; letter-spacing:1px; color:var(--ink-dim); text-transform:uppercase; margin-bottom:4px; }
+#detailGrid .field b{ font-family:var(--font-mono); font-weight:700; font-size:17px; color:var(--ink); }
 
 @media (max-width:980px){
   #body{ grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
-  #sidebarLeft, #sidebarRight{ border:none; border-top:2px solid var(--paper); max-height:180px; }
+  #sidebarLeft, #sidebarRight{ border:none; border-top:3px solid var(--ink); max-height:180px; }
   #mapWrap{ border-right:none; }
 }
 
-/* ---------------- live-data additions ---------------- */
-.leaflet-marker-icon.glide{ transition:transform 1s linear; }
-.leaflet-zoom-anim .leaflet-marker-icon.glide{ transition:transform .25s cubic-bezier(0,0,.25,1); }
-.drone-icon.idle{ opacity:.5; }
-.drone-icon.hw .reticle{ border-color:var(--paper); }
-.drone-icon.hw .dot{ background:var(--paper); }
-.drone-icon.hw .spin{ border-top-color:var(--paper); }
-.drone-icon.hw .idlabel{ top:26px; color:var(--paper); border-color:var(--paper); }
-.victim-icon.low{ background:var(--brass); }
-#mapOverlay{ position:absolute; inset:14px; z-index:460; background:rgba(14,12,9,.9); display:flex; flex-direction:column;
+#mapOverlay{ position:absolute; inset:14px; z-index:460; background:var(--paper); border:3px solid var(--ink); display:flex; flex-direction:column;
   align-items:center; justify-content:center; text-align:center; padding:24px; gap:14px; }
 #mapOverlay[hidden]{ display:none; }
-#mapOverlay .ov-title{ font-family:var(--font-poster); font-size:34px; letter-spacing:2px; color:var(--gold); }
-#mapOverlay .ov-body{ font-family:var(--font-body); font-size:13px; line-height:1.6; color:var(--paper-dim); max-width:420px; }
-#mapOverlay .ov-bar{ width:260px; height:4px; background:var(--line); overflow:hidden; position:relative; }
-#mapOverlay .ov-bar i{ position:absolute; top:0; bottom:0; width:40%; background:var(--gold); animation:ovSlide 1.4s ease-in-out infinite; }
+#mapOverlay .ov-title{ font-family:var(--font-stencil); font-size:30px; letter-spacing:2px; color:var(--ink); }
+#mapOverlay .ov-body{ font-family:var(--font-body); font-size:13px; line-height:1.6; color:var(--ink-dim); max-width:420px; }
+#mapOverlay .ov-bar{ width:260px; height:6px; background:var(--paper-3); border:1px solid var(--ink); overflow:hidden; position:relative; }
+#mapOverlay .ov-bar i{ position:absolute; top:0; bottom:0; width:40%; background:var(--alert); animation:ovSlide 1.4s ease-in-out infinite; }
 @keyframes ovSlide{ 0%{ left:-40%; } 100%{ left:100%; } }
-#mapOverlay button{ margin-top:6px; cursor:pointer; background:transparent; color:var(--paper); border:2px solid var(--paper);
+#mapOverlay button{ margin-top:6px; cursor:pointer; background:var(--paper); color:var(--ink); border:2px solid var(--ink);
   font-family:var(--font-cond); font-weight:700; font-size:12px; letter-spacing:2px; text-transform:uppercase; padding:9px 18px; }
-#mapOverlay button:hover{ background:var(--paper); color:var(--ink); }
+#mapOverlay button:hover{ background:var(--ink); color:var(--paper); }
 </style>
 </head>
 <body>
@@ -346,28 +331,28 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
   </header>
 
   <div id="statBand">
-    <div class="stat"><div class="num gold" id="statDrones">0/0</div><div class="cap">Drones Active</div></div>
-    <div class="stat"><div class="num alta" id="statVictims">0</div><div class="cap">Victims Unrescued</div></div>
-    <div class="stat"><div class="num moss" id="statTeams">0/0</div><div class="cap">Teams Deployed</div></div>
-    <div class="stat"><div class="num" id="statShelter">0%</div><div class="cap">Shelter Capacity</div></div>
-    <div class="stat"><div class="num" id="statRescued">0</div><div class="cap">Rescued To Date</div></div>
+    <div class="stat"><div class="chip"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="var(--ink)"/><path d="M12 9V5M12 19v-4M9 12H5M19 12h-4" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="5" cy="5" r="1.6" fill="var(--ink)"/><circle cx="19" cy="5" r="1.6" fill="var(--ink)"/><circle cx="5" cy="19" r="1.6" fill="var(--ink)"/><circle cx="19" cy="19" r="1.6" fill="var(--ink)"/></svg></div><div><div class="num" id="statDrones">0/0</div><div class="cap">Drones Active</div></div></div>
+    <div class="stat"><div class="chip"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" fill="var(--alert)"/><path d="M5 20c0-4 3-6.5 7-6.5S19 16 19 20" stroke="var(--alert)" stroke-width="2" stroke-linecap="round"/></svg></div><div><div class="num alta" id="statVictims">0</div><div class="cap">Victims Unrescued</div></div></div>
+    <div class="stat"><div class="chip"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19l8-14 8 14H4z" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/></svg></div><div><div class="num moss" id="statTeams">0/0</div><div class="cap">Teams Deployed</div></div></div>
+    <div class="stat"><div class="chip"><svg viewBox="0 0 24 24" fill="none"><path d="M4 11l8-6 8 6" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v8h12v-8" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/><rect x="10.5" y="14" width="3" height="4" fill="var(--ink)"/></svg></div><div><div class="num" id="statShelter">0%</div><div class="cap">Shelter Capacity</div></div></div>
+    <div class="stat"><div class="chip"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5.5 5.5L20 7" stroke="var(--moss)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><div class="num" id="statRescued">0</div><div class="cap">Rescued To Date</div></div></div>
   </div>
 
   <div id="body">
     <aside id="sidebarLeft" class="panel-scroll">
-      <div>
+      <div class="section-card">
         <div class="hd">Field Key</div>
         <div class="numlist">
-          <div class="row"><span class="idx">01</span><span class="swatch" style="background:var(--gold)"></span> Drone — patrol</div>
-          <div class="row"><span class="idx">02</span><span class="swatch circle" style="background:var(--alta)"></span> Victim — critical</div>
-          <div class="row"><span class="idx">03</span><span class="swatch circle" style="background:var(--gold)"></span> Victim — moderate</div>
-          <div class="row"><span class="idx">04</span><span class="swatch" style="background:var(--moss); clip-path:polygon(50% 0,100% 100%,0 100%);"></span> Rescue team</div>
-          <div class="row"><span class="idx">05</span><span class="swatch" style="background:var(--gold)"></span> Shelter</div>
-          <div class="row"><span class="idx">06</span><span class="swatch" style="background:var(--ink); border-color:var(--gold); transform:rotate(45deg);"></span> Resource cache</div>
-          <div class="row"><span class="idx">07</span><span class="swatch" style="background:var(--paper)"></span> Drone — hardware link</div>
+          <div class="row"><span class="badge fill"></span> Drone — patrol</div>
+          <div class="row"><span class="badge circle alert"></span> Victim — critical</div>
+          <div class="row"><span class="badge circle"></span> Victim — moderate</div>
+          <div class="row"><span class="badge" style="clip-path:polygon(50% 4%,96% 96%,4% 96%);"></span> Rescue team</div>
+          <div class="row"><span class="badge fill"></span> Shelter</div>
+          <div class="row"><span class="badge" style="transform:rotate(45deg);"></span> Resource cache</div>
+          <div class="row"><span class="badge alert"></span> Drone — hardware link</div>
         </div>
       </div>
-      <div>
+      <div class="section-card">
         <div class="hd">Affected Zones</div>
         <div id="zoneList"></div>
       </div>
@@ -377,6 +362,7 @@ header .clock{ font-family:var(--font-poster); font-weight:400; font-size:16px; 
       <div id="map"></div>
       <div class="corner-tick tl"></div><div class="corner-tick tr"></div>
       <div class="corner-tick bl"></div><div class="corner-tick br"></div>
+      <div class="map-vignette"></div>
       <div id="mapCaption">Grid Ref <b>DL-7734</b></div>
       <div id="simClockPlate">T+00:00</div>
       <div id="mapOverlay" hidden>
@@ -457,6 +443,11 @@ if(!FORCE_OFFLINE){
 })();
 
 /* ---------------- HERO DRONE: fullscreen entrance -> spin -> settle as brand mark ---------------- */
+// Exposed so enterCommandCenter() can force this to completion if the person
+// skips before it finishes -- otherwise the (intentionally intro-independent)
+// drone element keeps animating on its own, floating over the now-visible
+// dashboard until its own timeline naturally finishes.
+let heroDroneTimeline = null;
 function playHeroDrone(onDone){
   const hero = document.getElementById('heroDrone');
   const slot = document.getElementById('markSlot');
@@ -464,7 +455,7 @@ function playHeroDrone(onDone){
     const rect = slot.getBoundingClientRect();
     const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
     gsap.set(hero, { opacity:0, scale:0.6, xPercent:-50, yPercent:-50, rotation:0, left:'50%', top:'50%', width:300, height:300 });
-    gsap.timeline({ onComplete: ()=>{
+    heroDroneTimeline = gsap.timeline({ onComplete: ()=>{
         hero.style.position = 'relative';
         hero.style.left = '0'; hero.style.top = '0'; hero.style.width = '100%'; hero.style.height = '100%';
         hero.style.transform = 'none';
@@ -484,12 +475,12 @@ function playHeroDrone(onDone){
 (function(){
   const introEl = document.getElementById('intro');
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x0a0806, 0.02);
+  scene.fog = new THREE.FogExp2(0xf1e9d6, 0.018);
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 1000);
   const renderer = new THREE.WebGLRenderer({ antialias:true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0x0a0806);
+  renderer.setClearColor(0xf1e9d6);
   introEl.insertBefore(renderer.domElement, introEl.firstChild);
 
   const size = 240, seg = 80;
@@ -502,20 +493,20 @@ function playHeroDrone(onDone){
     pos.setY(i, h);
   }
   geo.computeVertexNormals();
-  const terrain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color:0x6b5230, wireframe:true, transparent:true, opacity:0.5 }));
+  const terrain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color:0x4a4030, wireframe:true, transparent:true, opacity:0.4 }));
   scene.add(terrain);
 
-  const grid = new THREE.GridHelper(size, 24, 0x8a6a3a, 0x2a2015);
+  const grid = new THREE.GridHelper(size, 24, 0x9c875e, 0xe2d5b2);
   grid.position.y = -0.5;
   scene.add(grid);
 
   const drone = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.3,1.4), new THREE.MeshBasicMaterial({ color:0xd6923e }));
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.3,1.4), new THREE.MeshBasicMaterial({ color:0x201a10 }));
   drone.add(body);
   [[1,0,1],[1,0,-1],[-1,0,1],[-1,0,-1]].forEach(p=>{
-    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.08,14), new THREE.MeshBasicMaterial({ color:0x3a2c14, wireframe:true }));
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.08,14), new THREE.MeshBasicMaterial({ color:0x9c875e, wireframe:true }));
     rotor.position.set(p[0],0.05,p[2]); drone.add(rotor);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.1,Math.sqrt(2)*1.05), new THREE.MeshBasicMaterial({color:0x2a2014}));
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.1,Math.sqrt(2)*1.05), new THREE.MeshBasicMaterial({color:0x201a10}));
     arm.position.set(p[0]*0.5,0,p[2]*0.5); arm.rotation.y = Math.PI/4*(p[0]*p[2]>0?1:-1);
     drone.add(arm);
   });
@@ -542,7 +533,7 @@ function playHeroDrone(onDone){
     const camOffset = new THREE.Vector3().subVectors(p,pNext).normalize().multiplyScalar(-9);
     camOffset.y += 4.5;
     camera.position.copy(p).add(camOffset);
-    camera.lookAt(p);
+    camera.lookAt(p.x, p.y + 2.4, p.z); // aim slightly above the drone so it flies in the lower part of the frame, clear of the title
     renderer.render(scene, camera);
 
     document.getElementById('tAlt').textContent = (120+Math.sin(introT*6)*14).toFixed(0);
@@ -552,23 +543,47 @@ function playHeroDrone(onDone){
   }
   animateIntro();
 
-  window.addEventListener('resize', ()=>{
+  function onIntroResize(){
+    if(!introActive) return;
     camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  }
+  window.addEventListener('resize', onIntroResize);
 
+  setTimeout(()=>renderer.domElement.classList.add('show'), 6000); // safety net
   playHeroDrone(()=>{
+    renderer.domElement.classList.add('show');
     gsap.timeline()
       .to('#centerTitle', {opacity:1, duration:0.9, delay:0.15})
       .to('#titleRule', {width:'220px', duration:0.7, ease:'power3.out'}, '-=0.3')
       .to('#centerSub', {opacity:1, duration:0.7}, '-=0.2')
-      .to('.plate', {opacity:1, duration:0.6, stagger:0.12}, '-=0.8')
+      .to('.plate, #telemetryRow', {opacity:1, duration:0.6, stagger:0.12}, '-=0.8')
       .to('#skipBtn', {opacity:1, duration:0.6}, '-=0.4');
   });
 
   function enterCommandCenter(){
     introActive = false;
+    window.removeEventListener('resize', onIntroResize);
+    // Once the intro is done, the WebGL context serves no further purpose -- but merely
+    // hiding its canvas (display:none) leaves the context allocated. Measured effect in
+    // this environment: with it left alive, requestAnimationFrame drops to about one
+    // callback per second, GLOBALLY, for the rest of the page's life -- not a gsap bug,
+    // not a canvas-cost bug, a starved frame scheduler. Disposing it here fixed it in
+    // every repeated trial.
+    renderer.dispose();
+    renderer.forceContextLoss();
+    renderer.domElement.remove();
+    // Jump the hero drone straight to its settled, docked-in-the-header state if it
+    // was skipped mid-flight -- it lives outside #intro on purpose, so hiding #intro
+    // alone would leave it floating over the dashboard until its own tween finished.
+    if(heroDroneTimeline && heroDroneTimeline.progress() < 1) heroDroneTimeline.progress(1);
     gsap.to(introEl, { opacity:0, duration:1, ease:'power2.inOut', onComplete:()=>{ introEl.style.display='none'; }});
+    // Belt-and-suspenders: if requestAnimationFrame ever gets starved for any reason
+    // (observed under software-rendered/headless testing; root cause not fully pinned
+    // down, so this guarantees the symptom can't happen regardless of cause) the tween
+    // above can stall mid-fade, leaving the intro visibly stuck over the dashboard
+    // forever. This forces it hidden regardless, comfortably after the 1s tween.
+    setTimeout(()=>{ introEl.style.opacity='0'; introEl.style.display='none'; }, 1600);
     const dash = document.getElementById('dashboard');
     dash.classList.add('live');
     gsap.to(dash, { opacity:1, duration:1, ease:'power2.out' });
@@ -651,11 +666,11 @@ function playHeroDrone(onDone){
       rescued: 0,
       victimSeq: 1,
       zones: [
-        { id: 'ZN-01', name: 'Riverside Flood Zone', type: 'FLOOD', severity: 'SEVERE', color: '#5f8fa3',
+        { id: 'ZN-01', name: 'Riverside Flood Zone', type: 'FLOOD', severity: 'SEVERE', color: '#4f7589',
           pts: [[120, 760], [260, 690], [420, 700], [440, 860], [260, 900], [130, 860]] },
-        { id: 'ZN-02', name: 'Warehouse District Collapse', type: 'COLLAPSE', severity: 'CRITICAL', color: '#a8342b',
+        { id: 'ZN-02', name: 'Warehouse District Collapse', type: 'COLLAPSE', severity: 'CRITICAL', color: '#c2401c',
           pts: [[640, 300], [760, 280], [790, 400], [700, 440], [620, 400]] },
-        { id: 'ZN-03', name: 'Northside Fire Perimeter', type: 'FIRE', severity: 'ACTIVE', color: '#d6923e',
+        { id: 'ZN-03', name: 'Northside Fire Perimeter', type: 'FIRE', severity: 'ACTIVE', color: '#9c7a1f',
           pts: [[300, 120], [420, 140], [440, 240], [330, 260], [270, 200]] }
       ],
       shelters: [
@@ -976,34 +991,53 @@ function initDashboard(){
   if(dashboardInitialized) return;
   dashboardInitialized = true;
 
-  /* ---------- procedural tactical basemap ---------- */
-  const W=1000,H=1000;
-  const bm = document.createElement('canvas'); bm.width=W; bm.height=H;
-  const bctx = bm.getContext('2d');
-  bctx.fillStyle = '#0c0a08'; bctx.fillRect(0,0,W,H);
-  bctx.strokeStyle = 'rgba(214,146,62,0.10)';
-  for(let r=40;r<900;r+=55){
-    bctx.beginPath();
-    for(let a=0;a<=360;a+=4){
-      const rad=a*Math.PI/180, wobble=Math.sin(rad*3+r)*18+Math.cos(rad*5)*10;
-      const x=500+Math.cos(rad)*(r+wobble), y=500+Math.sin(rad)*(r+wobble)*0.7;
-      a===0?bctx.moveTo(x,y):bctx.lineTo(x,y);
-    }
-    bctx.stroke();
-  }
-  bctx.strokeStyle = 'rgba(120,140,150,0.5)'; bctx.lineWidth=24;
-  bctx.beginPath(); bctx.moveTo(0,180);
-  bctx.bezierCurveTo(260,260,340,520,620,560); bctx.bezierCurveTo(820,590,880,720,1000,760);
-  bctx.stroke();
-  bctx.strokeStyle='rgba(255,255,255,0.03)'; bctx.lineWidth=1;
-  for(let i=0;i<=1000;i+=50){ bctx.beginPath();bctx.moveTo(i,0);bctx.lineTo(i,1000);bctx.stroke();
-    bctx.beginPath();bctx.moveTo(0,i);bctx.lineTo(1000,i);bctx.stroke(); }
-
   const bounds=[[0,0],[1000,1000]];
   const map = L.map('map', { crs:L.CRS.Simple, minZoom:-1, maxZoom:3, zoomControl:false, attributionControl:false });
-  L.imageOverlay(bm.toDataURL(), bounds).addTo(map);
   map.fitBounds(bounds); map.setView([500,500],0);
   L.control.zoom({ position:'bottomright' }).addTo(map);
+
+  // The tactical basemap is built as SVG markup (string concatenation), not drawn to a
+  // <canvas> and rasterized to a data URL. An earlier canvas+toDataURL() version measured
+  // ~800ms just to PNG-encode a 1000x1000 canvas -- long enough to visibly stall the
+  // intro's fade-out tween. Swapping toDataURL() for toBlob() didn't fix it either: in this
+  // environment the call to toBlob() itself blocked for 1000ms+ before even returning.
+  // SVG has no rasterize/encode step at all, so there's nothing left that can block.
+  function buildBasemapSVG(){
+    // Index contours every 5th ring, drawn heavier -- the real USGS convention --
+    // instead of a second colour pass. One consistent tan ink, varying only in weight.
+    let contours = '';
+    let ring = 0;
+    for(let r=50; r<920; r+=58){
+      ring++;
+      const isIndex = ring % 5 === 0;
+      let d = '';
+      for(let a=0;a<=360;a+=4){
+        const rad=a*Math.PI/180, wobble=Math.sin(rad*3+r)*18+Math.cos(rad*5)*10;
+        const x=(500+Math.cos(rad)*(r+wobble)).toFixed(1), y=(500+Math.sin(rad)*(r+wobble)*0.7).toFixed(1);
+        d += (a===0?'M':'L')+x+','+y+' ';
+      }
+      contours += `<path d="${d}Z" fill="none" stroke="#a9875a" stroke-width="${isIndex?1.6:0.8}" opacity="${isIndex?0.55:0.3}"/>`;
+    }
+    const river = 'M0,180 C260,260 340,520 620,560 C820,590 880,720 1000,760';
+    const riverLayers = [['#9fc1cc', 20], ['#4f7589', 2.5]]
+      .map(([c,w]) => `<path d="${river}" fill="none" stroke="${c}" stroke-width="${w}"/>`).join('');
+    let grid = '';
+    for(let i=0;i<=1000;i+=50){
+      grid += `<line x1="${i}" y1="0" x2="${i}" y2="1000" stroke="#201a10" stroke-opacity="0.04"/>`;
+      grid += `<line x1="0" y1="${i}" x2="1000" y2="${i}" stroke="#201a10" stroke-opacity="0.04"/>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+      <defs>
+        <radialGradient id="vig" cx="50%" cy="50%" r="55%">
+          <stop offset="0%" stop-color="#9c875e" stop-opacity="0"/><stop offset="100%" stop-color="#9c875e" stop-opacity="0.22"/>
+        </radialGradient>
+      </defs>
+      <rect width="1000" height="1000" fill="#dfd2ae"/>
+      ${grid}${contours}${riverLayers}
+      <rect width="1000" height="1000" fill="url(#vig)"/>
+    </svg>`;
+  }
+  L.imageOverlay('data:image/svg+xml;utf8,'+encodeURIComponent(buildBasemapSVG()), bounds).addTo(map);
 
   /* ---------- state + map layers, keyed by entity id ---------- */
   const world  = { drones:new Map(), victims:new Map(), teams:new Map(), shelters:new Map(), resources:new Map(), rescued:0 };
@@ -1022,8 +1056,11 @@ function initDashboard(){
   function droneIcon(d){
     const hw = d.source==='hardware';
     const cls = 'drone-icon' + (hw?' hw':'') + (isIdle(d)?' idle':'');
-    return L.divIcon({ className:'', iconSize:[22,22], iconAnchor:[11,11],
-      html:`<div class="${cls}"><div class="spin"></div><div class="reticle"></div><div class="dot"></div>${hw?`<div class="idlabel">${d.id} · HW</div>`:''}</div>` });
+    const pct = Math.max(0, Math.min(100, d.battery));
+    const ringColor = pct <= 22 ? 'var(--alert)' : pct <= 50 ? 'var(--ochre)' : 'var(--moss)';
+    const ring = `conic-gradient(${ringColor} ${pct*3.6}deg, var(--line) 0deg)`;
+    return L.divIcon({ className:'', iconSize:[26,26], iconAnchor:[13,13],
+      html:`<div class="${cls}"><div class="battery-ring" style="background:${ring}"></div><div class="body"></div>${hw?`<div class="idlabel">${d.id} · HW</div>`:''}</div>` });
   }
   const victimKey = (v) => v.status==='RESCUED' ? 'rescued' : v.priority;
   function victimIcon(v){
@@ -1103,15 +1140,36 @@ function initDashboard(){
     let line = layers.routes.get(t.id);
     if(target){
       const pts = [ll(t.pos), ll(target.pos)];
-      if(!line){ line = L.polyline(pts, { color:'#5c7452', weight:3, dashArray:'8,6', opacity:0.9 }).addTo(map); layers.routes.set(t.id, line); }
+      if(!line){ line = L.polyline(pts, { color:'#4f6b3a', weight:2.5, dashArray:'7,5', opacity:0.85 }).addTo(map); layers.routes.set(t.id, line); }
       else line.setLatLngs(pts);
     } else if(line){ map.removeLayer(line); layers.routes.delete(t.id); }
+  }
+  // Diagonal cross-hatch per zone, the actual topo/military-map convention for
+  // marking an area -- not a translucent colour wash with a glow behind it.
+  function ensureZoneHatch(svgRoot, id, color){
+    const ns = 'http://www.w3.org/2000/svg';
+    let defs = svgRoot.querySelector('defs');
+    if(!defs){ defs = document.createElementNS(ns,'defs'); svgRoot.insertBefore(defs, svgRoot.firstChild); }
+    if(svgRoot.querySelector('#'+id)) return;
+    const pattern = document.createElementNS(ns,'pattern');
+    pattern.setAttribute('id', id); pattern.setAttribute('width','8'); pattern.setAttribute('height','8');
+    pattern.setAttribute('patternUnits','userSpaceOnUse'); pattern.setAttribute('patternTransform','rotate(45)');
+    const line = document.createElementNS(ns,'line');
+    line.setAttribute('x1','0'); line.setAttribute('y1','0'); line.setAttribute('x2','0'); line.setAttribute('y2','8');
+    line.setAttribute('stroke', color); line.setAttribute('stroke-width','2'); line.setAttribute('stroke-opacity','0.55');
+    pattern.appendChild(line); defs.appendChild(pattern);
   }
   function drawZones(zones){
     layers.zones.forEach(z => map.removeLayer(z)); layers.zones = [];
     zones.forEach(z=>{
-      layers.zones.push(L.polygon(z.pts.map(p=>[p[1],p[0]]), { color:z.color, weight:2, fillColor:z.color, fillOpacity:0.14, dashArray:'6,4' })
-        .addTo(map).bindTooltip(z.name+' — '+z.severity, { className:'field-tip', direction:'top' }));
+      const poly = L.polygon(z.pts.map(p=>[p[1],p[0]]), { color:z.color, weight:2.5, fillOpacity:0, dashArray:'7,5', className:'zone-poly' })
+        .addTo(map).bindTooltip(z.name+' — '+z.severity, { className:'field-tip', direction:'top' });
+      const el = poly.getElement();
+      if(el){
+        const svgRoot = el.closest('svg'); const hatchId = 'hatch-'+z.id;
+        if(svgRoot){ ensureZoneHatch(svgRoot, hatchId, z.color); el.setAttribute('fill', 'url(#'+hatchId+')'); }
+      }
+      layers.zones.push(poly);
     });
     document.getElementById('zoneList').innerHTML = zones.map(z=>
       `<div class="zonerow"><span>${z.name}</span><b style="color:${z.color}">${z.severity}</b></div>`).join('');

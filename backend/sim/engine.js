@@ -66,11 +66,11 @@
       rescued: 0,
       victimSeq: 1,
       zones: [
-        { id: 'ZN-01', name: 'Riverside Flood Zone', type: 'FLOOD', severity: 'SEVERE', color: '#5f8fa3',
+        { id: 'ZN-01', name: 'Riverside Flood Zone', type: 'FLOOD', severity: 'SEVERE', color: '#4f7589',
           pts: [[120, 760], [260, 690], [420, 700], [440, 860], [260, 900], [130, 860]] },
-        { id: 'ZN-02', name: 'Warehouse District Collapse', type: 'COLLAPSE', severity: 'CRITICAL', color: '#a8342b',
+        { id: 'ZN-02', name: 'Warehouse District Collapse', type: 'COLLAPSE', severity: 'CRITICAL', color: '#c2401c',
           pts: [[640, 300], [760, 280], [790, 400], [700, 440], [620, 400]] },
-        { id: 'ZN-03', name: 'Northside Fire Perimeter', type: 'FIRE', severity: 'ACTIVE', color: '#d6923e',
+        { id: 'ZN-03', name: 'Northside Fire Perimeter', type: 'FIRE', severity: 'ACTIVE', color: '#9c7a1f',
           pts: [[300, 120], [420, 140], [440, 240], [330, 260], [270, 200]] }
       ],
       shelters: [
